@@ -9,7 +9,7 @@ unit audacity_noiseremoval;
 interface
 
 uses
-  Classes, SysUtils, audacity_realfftf;//realfft_c;
+  Classes, SysUtils, audacity_realfftf;
 
 type
 

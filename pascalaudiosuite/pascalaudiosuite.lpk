@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Package Version="4">
+    <Name Value="PascalAudioSuite"/>
+    <Type Value="RunAndDesignTime"/>
+    <CompilerOptions>
+      <Version Value="11"/>
+      <SearchPaths>
+        <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)/"/>
+      </SearchPaths>
+      <Conditionals Value="if SrcOS = 'unix' then
+  CustomOptions+='-dUSEPULSE';"/>
+    </CompilerOptions>
+    <Files Count="14">
+      <Item1>
+        <Filename Value="pa_base.pas"/>
+        <UnitName Value="pa_base"/>
+      </Item1>
+      <Item2>
+        <Filename Value="pa_lists.pas"/>
+        <UnitName Value="pa_lists"/>
+      </Item2>
+      <Item3>
+        <Filename Value="pa_resample.pas"/>
+        <UnitName Value="pa_resample"/>
+      </Item3>
+      <Item4>
+        <Filename Value="pa_enc_oggvorbis.pas"/>
+        <UnitName Value="pa_enc_oggvorbis"/>
+      </Item4>
+      <Item5>
+        <Filename Value="pa_stream.pas"/>
+        <UnitName Value="pa_stream"/>
+      </Item5>
+      <Item6>
+        <Filename Value="pa_ladspa.pas"/>
+        <UnitName Value="pa_ladspa"/>
+      </Item6>
+      <Item7>
+        <Filename Value="pa_dec_oggvorbis.pas"/>
+        <UnitName Value="pa_dec_oggvorbis"/>
+      </Item7>
+      <Item8>
+        <Filename Value="pa_noiseremoval.pas"/>
+        <UnitName Value="pa_noiseremoval"/>
+      </Item8>
+      <Item9>
+        <Filename Value="pa_cdaudio.pas"/>
+        <UnitName Value="pa_cdaudio"/>
+      </Item9>
+      <Item10>
+        <Filename Value="pa_process.pas"/>
+        <UnitName Value="pa_process"/>
+      </Item10>
+      <Item11>
+        <Filename Value="pa_wav.pas"/>
+        <UnitName Value="pa_wav"/>
+      </Item11>
+      <Item12>
+        <Filename Value="pa_binaural.pas"/>
+        <UnitName Value="pa_binaural"/>
+      </Item12>
+      <Item13>
+        <Filename Value="pa_samplerate.pas"/>
+        <UnitName Value="pa_samplerate"/>
+      </Item13>
+      <Item14>
+        <Filename Value="pa_pulse_simple.pas"/>
+        <UnitName Value="pa_pulse_simple"/>
+      </Item14>
+    </Files>
+    <RequiredPkgs Count="3">
+      <Item1>
+        <PackageName Value="pulse_simple_pkg"/>
+      </Item1>
+      <Item2>
+        <PackageName Value="PascalAudioIO"/>
+      </Item2>
+      <Item3>
+        <PackageName Value="FCL"/>
+      </Item3>
+    </RequiredPkgs>
+    <UsageOptions>
+      <UnitPath Value="$(PkgOutDir)"/>
+    </UsageOptions>
+    <PublishOptions>
+      <Version Value="2"/>
+    </PublishOptions>
+  </Package>
+</CONFIG>
