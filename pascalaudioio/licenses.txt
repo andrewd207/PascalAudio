@@ -1,0 +1,27 @@
+ladspa.pas - LGPL *
+ladspa_classes.pas - LGPL *
+samplerate.pas - LGPL **
+resample.pas - LGPL *
+audacity_noiseremoval.pas - GPL #
+audacity_realfft.pas - GPL #
+ogghfobject.pas - LGPL *
+bs2b.pas - LGPL ***
+
+Other files prefixed with pa_*.pas are modified LGPL with static linking exception
+
+
+*  modified LGPL with static linking exception. this applies to the .o file made
+   by the unit. To the best of my knowledge the libraries the .o files link to,
+   if any, are LGPL libraries.
+
+** modified LGPL with static linking exception. this applies to the .o file made
+   by the unit. However the libraries they link to are GPL not LGPL.
+
+***modified LGPL with static linking exception. this applies to the .o file made
+   by the unit. b2sb - seems very open. http://bs2b.sourceforge.net/license.html
+
+#  Audacity is GPL and the converted filter came from audacity's source. Might be
+   considered LGPL but assume GPL. Find out.
+
+
+

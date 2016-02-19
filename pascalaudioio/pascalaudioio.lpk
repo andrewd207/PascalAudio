@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Package Version="4">
+    <Name Value="PascalAudioIO"/>
+    <Type Value="RunAndDesignTime"/>
+    <CompilerOptions>
+      <Version Value="11"/>
+      <SearchPaths>
+        <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)/"/>
+      </SearchPaths>
+    </CompilerOptions>
+    <Files Count="14">
+      <Item1>
+        <Filename Value="ladspa.pas"/>
+        <UnitName Value="ladspa"/>
+      </Item1>
+      <Item2>
+        <Filename Value="samplerate.pas"/>
+        <UnitName Value="samplerate"/>
+      </Item2>
+      <Item3>
+        <Filename Value="resample.pas"/>
+        <UnitName Value="resample"/>
+      </Item3>
+      <Item4>
+        <Filename Value="pa_ringbuffer.pas"/>
+        <UnitName Value="pa_ringbuffer"/>
+      </Item4>
+      <Item5>
+        <Filename Value="ladspa_classes.pas"/>
+        <UnitName Value="ladspa_classes"/>
+      </Item5>
+      <Item6>
+        <Filename Value="audacity_noiseremoval.pas"/>
+        <UnitName Value="audacity_noiseremoval"/>
+      </Item6>
+      <Item7>
+        <Filename Value="audacity_realfftf.pas"/>
+        <UnitName Value="audacity_realfftf"/>
+      </Item7>
+      <Item8>
+        <Filename Value="ogghfobject.pas"/>
+        <UnitName Value="OggHfObject"/>
+      </Item8>
+      <Item9>
+        <Filename Value="flac.pas"/>
+        <UnitName Value="flac"/>
+      </Item9>
+      <Item10>
+        <Filename Value="paio_types.pas"/>
+        <UnitName Value="paio_types"/>
+      </Item10>
+      <Item11>
+        <Filename Value="bs2b.pas"/>
+        <UnitName Value="bs2b"/>
+      </Item11>
+      <Item12>
+        <Filename Value="licenses.txt"/>
+        <Type Value="Binary"/>
+      </Item12>
+      <Item13>
+        <Filename Value="COPYING.modifiedLGPL"/>
+        <Type Value="Binary"/>
+      </Item13>
+      <Item14>
+        <Filename Value="COPYING.txt"/>
+        <Type Value="Binary"/>
+      </Item14>
+    </Files>
+    <RequiredPkgs Count="1">
+      <Item1>
+        <PackageName Value="FCL"/>
+      </Item1>
+    </RequiredPkgs>
+    <UsageOptions>
+      <UnitPath Value="$(PkgOutDir)"/>
+    </UsageOptions>
+    <PublishOptions>
+      <Version Value="2"/>
+    </PublishOptions>
+  </Package>
+</CONFIG>
