@@ -9,7 +9,7 @@
         <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)/"/>
       </SearchPaths>
     </CompilerOptions>
-    <Files Count="14">
+    <Files Count="11">
       <Item1>
         <Filename Value="ladspa.pas"/>
         <UnitName Value="ladspa"/>
@@ -54,18 +54,6 @@
         <Filename Value="bs2b.pas"/>
         <UnitName Value="bs2b"/>
       </Item11>
-      <Item12>
-        <Filename Value="licenses.txt"/>
-        <Type Value="Binary"/>
-      </Item12>
-      <Item13>
-        <Filename Value="COPYING.modifiedLGPL"/>
-        <Type Value="Binary"/>
-      </Item13>
-      <Item14>
-        <Filename Value="COPYING.txt"/>
-        <Type Value="Binary"/>
-      </Item14>
     </Files>
     <RequiredPkgs Count="1">
       <Item1>
