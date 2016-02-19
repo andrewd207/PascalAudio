@@ -44,6 +44,7 @@ type
     function  GetMaxPosition: Double;
   public
     constructor Create; override;
+    procedure InitValues;
     //IPAPlayable
     procedure Play;
     procedure Pause;
@@ -148,6 +149,18 @@ constructor TPAOggVorbisDecoderSource.Create;
 begin
   inherited Create;
   Format:=afFloat32;
+end;
+
+procedure TPAOggVorbisDecoderSource.InitValues;
+var
+  Tmp: TOggDecFloat;
+begin
+  Tmp := TOggDecFloat.TryCreate(FStream, False);
+  Channels:=Tmp.Info^.channels;
+  SamplesPerSecond:=Tmp.Info^.rate;
+  Format:=afFloat32;
+  Tmp.Free;
+  FStream.Position:=0;
 end;
 
 procedure TPAOggVorbisDecoderSource.Play;

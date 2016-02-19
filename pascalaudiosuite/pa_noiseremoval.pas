@@ -63,7 +63,7 @@ begin
     FNoise[i] := TNoiseRemoval.Create;
     //FNoise[i].Level:=30; //does nothing!
     //FNoise[i].Sensitivity:=20;//3.95;
-    FNoise[i].Sensitivity:=9.95;
+    //FNoise[i].Sensitivity:=9.95;
    // FNoise[i].Gain:=-48;
    // FNoise[i].AttackDecayTime:=1000;
     FNoise[i].Init(SamplesPerSecond);
@@ -97,7 +97,7 @@ begin
   until ASampleCount = 0;
 
   // everytime the last channel is written plex the channels and write it out.
-  if i = High(FOutData) then
+  if i = Channels-1 then
   begin
     JoinedData := JoinChannels(FOutData, FOutWritePos[i]);
     WriteToBuffer(JoinedData[0], Length(JoinedData)*SizeOf(Single), FIsLast);
@@ -136,6 +136,7 @@ end;
 constructor TPANoiseRemovalLink.Create;
 begin
   inherited Create;
+  Format := afFloat32;
 end;
 
 destructor TPANoiseRemovalLink.Destroy;
