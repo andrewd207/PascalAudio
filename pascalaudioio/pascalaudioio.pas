@@ -9,7 +9,8 @@ interface
 uses
   ladspa, samplerate, resample, pa_ringbuffer, ladspa_classes, 
   audacity_noiseremoval, audacity_realfftf, OggHfObject, flac, paio_types, 
-  bs2b, paio_channelhelper, paio_utils, LazarusPackageIntf;
+  bs2b, paio_channelhelper, paio_utils, noiseremovalmultichannel, 
+  LazarusPackageIntf;
 
 implementation
 

@@ -30,7 +30,7 @@ type
     FHelper: TPAIOChannelHelper;
     FIsLast: Boolean;
     procedure InitData;
-    procedure NoiseRemovalDone(ASender: TNoiseRemoval; AData: PSingle; ASampleCount: Integer);
+    procedure NoiseRemovalDone(ASender: TObject; AData: PSingle; ASampleCount: Integer);
     procedure WriteDataIO(ASender: IPAIODataIOInterface; AData: PSingle; ASamples: Integer);
   protected
     function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; override;
@@ -91,7 +91,7 @@ begin
 
 end;
 
-procedure TPANoiseRemovalLink.NoiseRemovalDone(ASender: TNoiseRemoval; AData: PSingle; ASampleCount: Integer);
+procedure TPANoiseRemovalLink.NoiseRemovalDone(ASender: TObject; AData: PSingle; ASampleCount: Integer);
 begin
   (FHelper as IPAIODataIOInterface).WriteDataIO(ASender as IPAIODataIOInterface, AData, ASampleCount);
 end;

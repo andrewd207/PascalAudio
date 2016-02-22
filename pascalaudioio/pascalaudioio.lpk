@@ -6,10 +6,10 @@
     <CompilerOptions>
       <Version Value="11"/>
       <SearchPaths>
-        <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)/"/>
+        <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
       </SearchPaths>
     </CompilerOptions>
-    <Files Count="13">
+    <Files Count="14">
       <Item1>
         <Filename Value="ladspa.pas"/>
         <UnitName Value="ladspa"/>
@@ -62,6 +62,10 @@
         <Filename Value="paio_utils.pas"/>
         <UnitName Value="paio_utils"/>
       </Item13>
+      <Item14>
+        <Filename Value="noiseremovalmultichannel.pas"/>
+        <UnitName Value="noiseremovalmultichannel"/>
+      </Item14>
     </Files>
     <RequiredPkgs Count="1">
       <Item1>

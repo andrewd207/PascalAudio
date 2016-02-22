@@ -17,7 +17,7 @@ type
   TSingleArray = array of Single;
 
   TNoiseRemoval = class;
-  TNoiseWriteProc = procedure(ASender: TNoiseRemoval; AData: PSingle; ASampleCount: Integer) of Object;
+  TNoiseWriteProc = procedure(ASender: TObject; AData: PSingle; ASampleCount: Integer) of Object;
 
   { TNoiseRemoval }
 
