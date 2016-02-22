@@ -2,6 +2,8 @@ program noiseremoval;
 
 {$mode objfpc}{$H+}
 
+{$DEFINE USE_STEREO}
+
 uses
   {$IFDEF UNIX}
   cmem,
@@ -10,8 +12,13 @@ uses
   Classes, pa_noiseremoval, pa_pulse_simple, pa_dec_oggvorbis, pa_stream, pa_base, sysutils;
 
 const
+  {$IFDEF USE_STEREO}
   NoiseSampleFile = 'noisestereo.ogg';
   FileName = 'noisyaudiostereo.ogg';
+  {$ELSE}
+  NoiseSampleFile = 'noise.ogg';
+  FileName = 'noisyaudio.ogg';
+  {$ENDIF}
 
 function GetNoiseStream(out ChannelCount: Integer): TMemoryStream;
 var
@@ -21,9 +28,6 @@ var
 begin
   ogg := TPAOggVorbisDecoderSource.Create;
   ogg.Stream := TFileStream.Create(NoiseSampleFile, fmOpenRead or fmShareDenyNone);
-  ogg.InitValues; // to initialize channel count.
-
-  ChannelCount:=ogg.Channels;
 
   Result := TMemoryStream.Create;
   StreamDest := TPAStreamDestination.Create(Result);
@@ -34,6 +38,8 @@ begin
   //while ogg.Working  do
   //  sleep(0);
   sleep(1000);
+
+  ChannelCount:=ogg.Channels;
   ogg.Stream.Free;
   ogg.Free;
 
