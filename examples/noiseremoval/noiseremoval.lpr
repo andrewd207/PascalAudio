@@ -10,10 +10,10 @@ uses
   Classes, pa_noiseremoval, pa_pulse_simple, pa_dec_oggvorbis, pa_stream, pa_base, sysutils;
 
 const
-  NoiseSampleFile = 'noise.ogg';
-  FileName = 'noisyaudio.ogg';
+  NoiseSampleFile = 'noisestereo.ogg';
+  FileName = 'noisyaudiostereo.ogg';
 
-function GetNoiseStream: TMemoryStream;
+function GetNoiseStream(out ChannelCount: Integer): TMemoryStream;
 var
   StreamDest: TPAStreamDestination;
   ogg: TPAOggVorbisDecoderSource;
@@ -21,6 +21,9 @@ var
 begin
   ogg := TPAOggVorbisDecoderSource.Create;
   ogg.Stream := TFileStream.Create(NoiseSampleFile, fmOpenRead or fmShareDenyNone);
+  ogg.InitValues; // to initialize channel count.
+
+  ChannelCount:=ogg.Channels;
 
   Result := TMemoryStream.Create;
   StreamDest := TPAStreamDestination.Create(Result);
@@ -47,6 +50,9 @@ var
   ogg: TPAOggVorbisDecoderSource;
   noise: TPANoiseRemovalLink;
   pulse: TPAPulseDestination;
+  Channels: TChannelArray;
+  ChanCount: Integer;
+  i: Integer;
 begin
   // open ogg file to be cleaned
   ogg := TPAOggVorbisDecoderSource.Create;
@@ -78,9 +84,12 @@ begin
   pulse.DataSource := noise;
 
   // set the noise profile
-  RawNoiseStream := GetNoiseStream;
-  noise.SetNoiseProfile(0, PSingle(RawNoiseStream.Memory), RawNoiseStream.Size div SizeOf(Single));
+  RawNoiseStream := GetNoiseStream(ChanCount);
+
+  Channels := SplitChannels(PSingle(RawNoiseStream.Memory), RawNoiseStream.Size div SizeOf(Single), ChanCount);
   RawNoiseStream.Free;
+  for i := 0 to Length(Channels)-1 do
+    noise.SetNoiseProfile(i, @Channels[i][0], Length(Channels[i]));
 
   // filter audio and play to pulse
   ogg.StartData;
