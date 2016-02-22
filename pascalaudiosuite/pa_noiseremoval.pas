@@ -18,20 +18,20 @@ unit pa_noiseremoval;
 interface
 
 uses
-  Classes, SysUtils, pa_base, audacity_noiseremoval;
+  Classes, SysUtils, pa_base, audacity_noiseremoval, paio_channelhelper;
 
 type
   { TPANoiseRemovalLink }
 
-  TPANoiseRemovalLink = class(TPAAudioLink, IPAAudioInformation)
+  TPANoiseRemovalLink = class(TPAAudioLink, IPAAudioInformation, IPAIODataIOInterface)
   private
     FInited: Boolean;
     FNoise: array of TNoiseRemoval;
-    FOutData: TChannelArray;
-    FOutWritePos: array of Integer;
+    FHelper: TPAIOChannelHelper;
     FIsLast: Boolean;
     procedure InitData;
     procedure NoiseRemovalDone(ASender: TNoiseRemoval; AData: PSingle; ASampleCount: Integer);
+    procedure WriteDataIO(ASender: IPAIODataIOInterface; AData: PSingle; ASamples: Integer);
   protected
     function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; override;
     procedure SignalDestinationsDone; override;
@@ -46,6 +46,21 @@ type
 
 implementation
 
+type
+
+ { TPANoiseRemval }
+
+ TPANoiseRemoval = class(TNoiseRemoval, IPAIODataIOInterface)
+   procedure WriteDataIO(ASender: IPAIODataIOInterface; AData: PSingle; ASamples: Integer);
+ end;
+
+{ TPANoiseRemval }
+
+procedure TPANoiseRemoval.WriteDataIO(ASender: IPAIODataIOInterface; AData: PSingle; ASamples: Integer);
+begin
+  Process(AData, ASamples, False);
+end;
+
 { TPANoiseRemovalLink }
 
 procedure TPANoiseRemovalLink.InitData;
@@ -56,11 +71,15 @@ begin
     Exit;
 
   FInited := True;
+  if Assigned(FHelper) then
+    FreeAndNil(FHelper);
+  FHelper := TPAIOChannelHelper.Create(Self);
 
   SetLength(FNoise, Channels);
   for i := 0 to Channels-1 do
   begin
-    FNoise[i] := TNoiseRemoval.Create;
+    FNoise[i] := TPANoiseRemoval.Create;
+    FHelper.Outputs.Add(FNoise[i] as IPAIODataIOInterface);
     //FNoise[i].Level:=30; //does nothing!
     //FNoise[i].Sensitivity:=20;//3.95;
     //FNoise[i].Sensitivity:=9.95;
@@ -70,57 +89,28 @@ begin
     FNoise[i].WriteProc:=@NoiseRemovalDone;
   end;
 
-  FOutData := NewChannelArray(Channels, AUDIO_BUFFER_FLOAT_SAMPLES div Channels);
-  SetLength(FOutWritePos, Channels);
 end;
 
 procedure TPANoiseRemovalLink.NoiseRemovalDone(ASender: TNoiseRemoval; AData: PSingle; ASampleCount: Integer);
-var
-  i: Integer;
-  WriteSize: Integer;
-  JoinedData: TSingleArray;
 begin
-  for i := 0 to High(FNoise) do
-  begin
-    if FNoise[i] = ASender then
-      Break;
-  end;
+  (FHelper as IPAIODataIOInterface).WriteDataIO(ASender as IPAIODataIOInterface, AData, ASampleCount);
+end;
 
-  repeat
-    WriteSize := ASampleCount;
-    if WriteSize > Length(FOutData[0]) - FOutWritePos[i] then
-      WriteSize := Length(FOutData[0]) - FOutWritePos[i];
-
-    Dec(ASampleCount, WriteSize);
-    Move(AData^, FOutData[i][FOutWritePos[i]], SizeOf(Single) * WriteSize);
-    Inc(FOutWritePos[i], WriteSize);
-  until ASampleCount = 0;
-
-  // everytime the last channel is written plex the channels and write it out.
-  if i = Channels-1 then
-  begin
-    JoinedData := JoinChannels(FOutData, FOutWritePos[i]);
-    WriteToBuffer(JoinedData[0], Length(JoinedData)*SizeOf(Single), FIsLast);
-    for i := 0 to High(FOutWritePos) do
-      FOutWritePos[i] := 0;
-  end;
+procedure TPANoiseRemovalLink.WriteDataIO(ASender: IPAIODataIOInterface; AData: PSingle; ASamples: Integer);
+begin
+  // write plexed output from FHelper to buffer.
+  WriteToBuffer(AData^, ASamples*SizeOf(Single), FIsLast);
 end;
 
 function TPANoiseRemovalLink.InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64;
 var
-  ChanData: TChannelArray;
-  Samples,
   i: Integer;
 begin
-  Samples := ACount div SizeOf(Single);
-  ChanData:= SplitChannels(@AData, Samples, Channels);
-  for i := Low(ChanData) to High(ChanData) do
-  begin
-    FNoise[i].Process(@ChanData[i][0], Length(ChanData[i]), False);
-    FIsLast:=AIsLastData;
-    if FIsLast then
+  FHelper.Write(PSingle(@AData), ACount div SizeOf(Single));
+  FIsLast:=AIsLastData;
+  if FIsLast then
+    for i := Low(FNoise) to High(FNoise) do
       FNoise[i].Flush;
-  end;
 end;
 
 procedure TPANoiseRemovalLink.SignalDestinationsDone;
@@ -141,6 +131,7 @@ end;
 
 destructor TPANoiseRemovalLink.Destroy;
 begin
+  FHelper.Free;
   inherited Destroy;
 end;
 

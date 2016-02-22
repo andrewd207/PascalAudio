@@ -9,7 +9,7 @@
         <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)/"/>
       </SearchPaths>
     </CompilerOptions>
-    <Files Count="11">
+    <Files Count="13">
       <Item1>
         <Filename Value="ladspa.pas"/>
         <UnitName Value="ladspa"/>
@@ -54,6 +54,14 @@
         <Filename Value="bs2b.pas"/>
         <UnitName Value="bs2b"/>
       </Item11>
+      <Item12>
+        <Filename Value="paio_channelhelper.pas"/>
+        <UnitName Value="paio_channelhelper"/>
+      </Item12>
+      <Item13>
+        <Filename Value="paio_utils.pas"/>
+        <UnitName Value="paio_utils"/>
+      </Item13>
     </Files>
     <RequiredPkgs Count="1">
       <Item1>

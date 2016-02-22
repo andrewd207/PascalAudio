@@ -332,6 +332,8 @@ type
 function BufferPool: TPABufferPool; // threadsafe class
 
 implementation
+uses
+  paio_utils;
 
 var
   InternalBufferPool: TPABufferPool = nil;
@@ -358,73 +360,25 @@ begin
 end;
 
 function NewChannelArray(AChannels: Integer; ASamplesPerChannel: Integer): TChannelArray;
-var
-  i: Integer;
 begin
-  SetLength(Result, AChannels);
-  for i := 0 to AChannels-1 do
-    SetLength(Result[i], ASamplesPerChannel);
+  Result := paio_utils.NewChannelArray(AChannels, ASamplesPerChannel);
 end;
 
-// Samples is total samples not samples per channel.
-// So Samples = 1000 if 2 Channels have 500 each
 function SplitChannels(AData: PSingle; ASamples: Integer; AChannels: Integer): TChannelArray;
-var
-  SamplesPerChannel: Integer;
-  i, j: Integer;
 begin
-  SamplesPerChannel:=ASamples div AChannels;
-  //SetLength(Result, AChannels);
-  Result := NewChannelArray(AChannels, SamplesPerChannel);
-  for i := 0 to AChannels-1 do
-  begin
-    //SetLength(Result[i], SamplesPerChannel);
-    for j := 0 to SamplesPerChannel-1 do
-    begin
-      Result[i][j] := AData[j*AChannels+i];
-    end;
-  end;
+  Result := paio_utils.SplitChannels(AData, ASamples, AChannels);
 end;
 
 function JoinChannels(AChannelData: TChannelArray; ASamples: Integer): TSingleArray;
-var
-  i: Integer;
-  j: Integer;
-  Samples: Integer;
 begin
-  if Length(AChannelData) > 0 then
-  begin
-   if ASamples <> -1 then
-     Samples := ASamples
-   else
-     Samples := Length(AChannelData[0]);
-
-   SetLength(Result, Length(AChannelData) * Samples);
-    for i := 0 to High(AChannelData) do
-      for j := 0 to Samples-1 do
-        Result[j*Length(AChannelData)+i] := AChannelData[i][j];
-  end
-  else
-    SetLength(Result, 0);
+  Result := paio_utils.JoinChannels(AChannelData, ASamples);
 end;
 
-function JoinChannels(AChannelData: PPSingle; AChannels: Integer;
-  ASamples: Integer): TSingleArray;
-var
-  i: Integer;
-  j: Integer;
+function JoinChannels(AChannelData: PPSingle; AChannels: Integer; ASamples: Integer): TSingleArray;
 begin
-  if ASamples > 0 then
-  begin
-   SetLength(Result, AChannels * ASamples);
-    for i := 0 to AChannels-1 do
-      for j := 0 to ASamples-1 do
-        Result[j*AChannels+i] := AChannelData[i][j];
-  end
-  else
-    SetLength(Result, 0);
-
+  Result := paio_utils.JoinChannels(AChannelData, AChannels, ASamples);
 end;
+
 
 function BufferPool: TPABufferPool;
 begin
