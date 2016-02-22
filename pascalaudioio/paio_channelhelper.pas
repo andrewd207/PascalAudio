@@ -124,11 +124,20 @@ procedure TPAIOChannelHelper.Write(AData: PSingle; ASamples: Integer);
 var
   Channels: TChannelArray;
   i: Integer;
+  Pos: Integer = 0;
+  WCount: Integer;
 begin
+  AllocateBuffers;
   Channels := SplitChannels(AData, ASamples, Outputs.Count);
-  for i := 0 to Outputs.Count-1 do
+  while ASamples > 0 do
   begin
-    IPAIODataIOInterface(Outputs.Items[i]).WriteDataIO(Self, @Channels[i][0], Length(Channels[i]));
+    WCount := Min(1024, ASamples div Outputs.Count);
+    for i := 0 to Outputs.Count-1 do
+    begin
+      IPAIODataIOInterface(Outputs.Items[i]).WriteDataIO(Self, @Channels[i][Pos], WCount);
+    end;
+    Dec(ASamples, WCount * Outputs.Count);
+    Inc(Pos, WCount);
   end;
 end;
 

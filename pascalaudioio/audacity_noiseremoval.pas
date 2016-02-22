@@ -89,7 +89,7 @@ type
     constructor Create;
     destructor Destroy; override;
     function Init(ASampleRate: Integer): Boolean;
-    function Process(AData: PSingle; ASampleCount: Integer; AGetNoiseProfile: Boolean): Boolean;
+    function Process(AData: PSingle; ASampleCount: Integer; AGetNoiseProfile: Boolean; AMoreComing: Boolean = False): Boolean;
     procedure Flush; // finish writing out data in buffers.
 
     property NoiseProfile: TSingleArray read GetNoiseProfile write SetNoiseProfile;
@@ -602,14 +602,13 @@ begin
 end;
 
 function TNoiseRemoval.Process(AData: PSingle; ASampleCount: Integer;
-  AGetNoiseProfile: Boolean): Boolean;
+  AGetNoiseProfile: Boolean; AMoreComing: Boolean = False): Boolean;
 begin
   if not FInited then
     Raise Exception.Create('TNoiseRemoval is not Inited');
 
   if not AGetNoiseProfile and not FHasProfile then
     raise Exception.Create('Tried to remove noise without profile.');
-
 
   FDoProfile:=AGetNoiseProfile;
 
@@ -622,6 +621,9 @@ begin
   Inc(FTotalRead, ASampleCount);
   ProcessSamples(ASampleCount, AData);
   Result := True;
+
+  if AMoreComing then
+    Exit;
 
   if {AGetNoiseProfile or }FDoProfile then
   begin
