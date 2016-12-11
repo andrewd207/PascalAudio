@@ -9,7 +9,7 @@
         <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
       </SearchPaths>
     </CompilerOptions>
-    <Files Count="14">
+    <Files Count="19">
       <Item1>
         <Filename Value="ladspa.pas"/>
         <UnitName Value="ladspa"/>
@@ -43,8 +43,8 @@
         <UnitName Value="OggHfObject"/>
       </Item8>
       <Item9>
-        <Filename Value="flac.pas"/>
-        <UnitName Value="flac"/>
+        <Filename Value="flac_classes.pas"/>
+        <UnitName Value="flac_classes"/>
       </Item9>
       <Item10>
         <Filename Value="paio_types.pas"/>
@@ -66,6 +66,26 @@
         <Filename Value="noiseremovalmultichannel.pas"/>
         <UnitName Value="noiseremovalmultichannel"/>
       </Item14>
+      <Item15>
+        <Filename Value="flac_encode.inc"/>
+        <Type Value="Binary"/>
+      </Item15>
+      <Item16>
+        <Filename Value="flac_metadata.inc"/>
+        <Type Value="Binary"/>
+      </Item16>
+      <Item17>
+        <Filename Value="flac_format.inc"/>
+        <Type Value="Binary"/>
+      </Item17>
+      <Item18>
+        <Filename Value="flac_callbacks.inc"/>
+        <Type Value="Binary"/>
+      </Item18>
+      <Item19>
+        <Filename Value="flac_decode.inc"/>
+        <Type Value="Binary"/>
+      </Item19>
     </Files>
     <RequiredPkgs Count="1">
       <Item1>
