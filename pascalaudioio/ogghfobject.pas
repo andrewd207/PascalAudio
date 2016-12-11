@@ -58,6 +58,7 @@ type
      function CloseCB: cint; cdecl;
      function TellCB: clong; cdecl;
      function ReadCB (ptr: pointer; size, nmemb: csize_t): csize_t; cdecl;
+     function GetFileSize: Int64;
 
   public
     class function IsValidOgg(AFile: TStream; AOgg: POggDecFloat = nil): Boolean;
@@ -99,7 +100,7 @@ type
     property SerialNumber: LongInt index -1 read GetSerialNumber;
 
     property Seekable: Boolean read GetSeekable;
-
+    property FileSize: Int64 read GetFileSize;
   end;
 
 implementation
@@ -296,6 +297,13 @@ function TOggDecFloat.ReadCB(ptr: pointer; size, nmemb: csize_t): csize_t;
   cdecl;
 begin
  Result := FStream.Read(ptr^,nmemb*size);
+end;
+
+function TOggDecFloat.GetFileSize: Int64;
+begin
+   Result := 0;
+   if Assigned(FStream) then
+     Result := FStream.Size;
 end;
 
 destructor TOggDecFloat.Destroy;
