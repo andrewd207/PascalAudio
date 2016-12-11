@@ -45,6 +45,28 @@ type
     property OwnsStream: Boolean read FOwnsStream;
   end;
 
+  TPAWavDest = class(TPAAudioDestination, IPAStream)
+  private
+    const
+      cFileSizeOff = 4;
+      cDataSizeOff = 40;
+  private
+    FStream: TStream;
+    FOwnsStream: Boolean;
+    FInited: Boolean;
+    FFinished: Boolean;
+    FDataSize: DWord;
+    function GetStream: TStream;
+    procedure InitStream;
+    procedure FinishStream;
+  protected
+    function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; override;
+  public
+    constructor Create(AStream: TStream; AOwnsStream: Boolean); reintroduce;
+    destructor  Destroy; override;
+    property    Stream: TStream read GetStream;
+  end;
+
 implementation
 
 { TPAWavSource }
@@ -61,6 +83,105 @@ begin
     BlockAlign := LEtoN(BlockAlign);
     BitsPerSample := LEtoN(BitsPerSample);
   end;
+end;
+
+
+procedure NtoLE(var fmt: TWaveFormat); overload;
+begin
+  // from fpwavreader
+  with fmt, ChunkHeader do begin
+    Size := NtoLE(Size);
+    Format := NtoLE(Format);
+    Channels := NtoLE(Channels);
+    SampleRate := NtoLE(SampleRate);
+    ByteRate := NtoLE(ByteRate);
+    BlockAlign := NtoLE(BlockAlign);
+    BitsPerSample := NtoLE(BitsPerSample);
+  end;
+end;
+
+{ TPAWavDest }
+
+function TPAWavDest.GetStream: TStream;
+begin
+  Result := FStream;
+end;
+
+procedure TPAWavDest.InitStream;
+var
+  Riff: TRiffHeader;
+  WavChunk: TWaveFormat;
+  DataChunk: TChunkHeader;
+begin
+  FInited := True;
+
+  Riff.ChunkHeader.ID := AUDIO_CHUNK_ID_RIFF;
+  Riff.Format := AUDIO_CHUNK_ID_WAVE;
+  Riff.ChunkHeader.Size:=0; // fill in later
+
+  WavChunk.ChunkHeader.ID := AUDIO_CHUNK_ID_fmt;
+  WavChunk.ChunkHeader.Size:=16;
+  WavChunk.Format := AUDIO_FORMAT_PCM;
+
+  WavChunk.BitsPerSample := 16;
+  WavChunk.Channels:=Channels;
+  WavChunk.SampleRate:= SamplesPerSecond div Channels;
+  WavChunk.ByteRate:=(WavChunk.BitsPerSample * Channels) div 8;
+  NtoLE(WavChunk);
+
+  DataChunk.ID := AUDIO_CHUNK_ID_data;
+  DataChunk.Size:=0; // fill in later
+
+  FStream.Write(Riff, SizeOf(Riff));
+  FStream.Write(WavChunk, SizeOf(WavChunk));
+  FStream.Write(DataChunk, SizeOf(DataChunk));
+  //That's it.
+end;
+
+procedure TPAWavDest.FinishStream;
+begin
+  if FFinished then
+    Exit;
+
+  FFinished:= True;
+
+  // write total size -1
+  FStream.Position:=cFileSizeOff;
+  FStream.WriteDWord(NtoLE(DWord(FStream.Size-SizeOf(TChunkHeader))));
+
+  // write raw data size
+  FStream.Position:=cDataSizeOff;
+  FStream.WriteDWord(NtoLE(FDataSize));
+  FStream.Seek(0, soEnd);
+end;
+
+function TPAWavDest.InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64;
+begin
+  if not FInited then
+    InitStream;
+
+  Result := FStream.Write(AData, ACount);
+  Inc(FDataSize, Result);
+
+  if AIsLastData then
+  begin
+    FinishStream;
+  end;
+end;
+
+constructor TPAWavDest.Create(AStream: TStream; AOwnsStream: Boolean);
+begin
+  Inherited Create;
+  Format:= afS16;
+  FStream := AStream;
+  FOwnsStream:=AOwnsStream;
+end;
+
+destructor TPAWavDest.Destroy;
+begin
+  if FOwnsStream then
+    FreeAndNil(FStream);
+  inherited Destroy;
 end;
 
 procedure TPAWavSource.ReadHeader;
