@@ -208,7 +208,7 @@ function  FLAC__stream_encoder_init_ogg_file(
                ): TFlacStreamEncoderInitStatus; cdecl; external;
 
 function  FLAC__stream_encoder_finish(Encoder: PFlacStreamEncoderStruct): TFlacBool; cdecl; external;
-function  FLAC__stream_encoder_process(Encoder: PFlacStreamEncoderStruct; Buffer: PLongint; Samples: cunsigned): TFlacBool; cdecl; external;
+function  FLAC__stream_encoder_process(Encoder: PFlacStreamEncoderStruct; Buffer: PPLongint; Samples: cunsigned): TFlacBool; cdecl; external;
 function  FLAC__stream_encoder_process_interleaved(Encoder: PFlacStreamEncoderStruct; Buffer: PLongint; Samples: cunsigned): TFlacBool; cdecl; external;
 
 
