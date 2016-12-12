@@ -6,12 +6,12 @@
     <CompilerOptions>
       <Version Value="11"/>
       <SearchPaths>
-        <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)/"/>
+        <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
       </SearchPaths>
       <Conditionals Value="if SrcOS = 'unix' then
   CustomOptions+='-dUSEPULSE';"/>
     </CompilerOptions>
-    <Files Count="15">
+    <Files Count="16">
       <Item1>
         <Filename Value="pa_base.pas"/>
         <UnitName Value="pa_base"/>
@@ -72,6 +72,10 @@
         <Filename Value="pa_sox.pas"/>
         <UnitName Value="pa_sox"/>
       </Item15>
+      <Item16>
+        <Filename Value="pa_flac.pas"/>
+        <UnitName Value="pa_flac"/>
+      </Item16>
     </Files>
     <RequiredPkgs Count="3">
       <Item1>

@@ -82,7 +82,6 @@ end;
 
 function TPAStreamDestination.InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64;
 begin
-  //WriteLn('TStreamDestination writing');
   if Assigned(FStream) then
     Result := FStream.Write(AData, ACount);
 

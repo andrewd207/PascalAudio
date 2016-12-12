@@ -4,12 +4,11 @@
 
 unit PascalAudioSuite;
 
+{$warn 5023 off : no warning about unused units}
 interface
 
 uses
-  pa_base, pa_lists, pa_resample, pa_enc_oggvorbis, pa_stream, pa_ladspa, 
-  pa_dec_oggvorbis, pa_noiseremoval, pa_cdaudio, pa_process, pa_wav, 
-  pa_binaural, pa_samplerate, pa_pulse_simple, pa_sox, LazarusPackageIntf;
+  pa_base, pa_lists, pa_resample, pa_enc_oggvorbis, pa_stream, pa_ladspa, pa_dec_oggvorbis, pa_noiseremoval, pa_cdaudio, pa_process, pa_wav, pa_binaural, pa_samplerate, pa_pulse_simple, pa_sox, pa_flac, LazarusPackageIntf;
 
 implementation
 

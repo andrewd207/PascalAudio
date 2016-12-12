@@ -1332,7 +1332,7 @@ begin
     FDestBuf := nil;
   end;
 
-  WriteLn(ClassName,' telling destinations done');
+  //WriteLn(ClassName,' telling destinations done');
   for i := 0 to FDestinations.Count-1 do
     IPAAudioDestination(FDestinations[i]).EndOfData;
 end;
