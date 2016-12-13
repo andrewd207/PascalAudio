@@ -161,21 +161,21 @@ function  FLAC__metadata_object_seektable_template_append_points(obj: PFlacStrea
 function  FLAC__metadata_object_seektable_template_append_spaced_points(obj: PFlacStreamMetadataStruct; num: cunsigned; total_samples: QWord): TFlacbool; cdecl; external;
 function  FLAC__metadata_object_seektable_template_append_spaced_points_by_samples(obj: PFlacStreamMetadataStruct; samples: cunsigned; total_samples: QWord): TFlacbool; cdecl; external;
 function  FLAC__metadata_object_seektable_template_sort(obj: PFlacStreamMetadataStruct; compact: TFlacBool): TFlacbool; cdecl; external;
-function  FLAC__metadata_object_vorbiscomment_set_vendor_string(obj: PFlacStreamMetadataStruct; entry: TFlacStreamMetadataVorbisCommentStruct; copy: TFlacBool): TFlacbool; cdecl; external;
+
+// vorbis comment
+function  FLAC__metadata_object_vorbiscomment_set_vendor_string(obj: PFlacStreamMetadataStruct; entry: PFlacStreamMetadataVorbisCommentEntryStruct; copy: TFlacBool): TFlacbool; cdecl; external;
 function  FLAC__metadata_object_vorbiscomment_resize_comments(obj: PFlacStreamMetadataStruct; new_num_comments: cunsigned): TFlacbool; cdecl; external;
-function  FLAC__metadata_object_vorbiscomment_set_comment(obj: PFlacStreamMetadataStruct; comment_num: cunsigned; entry: TFlacStreamMetadataVorbisCommentStruct; copy: TFlacBool): TFlacbool; cdecl; external;
-function  FLAC__metadata_object_vorbiscomment_insert_comment(obj: PFlacStreamMetadataStruct; comment_num: cunsigned; entry: TFlacStreamMetadataVorbisCommentStruct; copy: TFlacBool): TFlacbool; cdecl; external;
-function  FLAC__metadata_object_vorbiscomment_append_comment(obj: PFlacStreamMetadataStruct; entry: TFlacStreamMetadataVorbisCommentStruct; copy: TFlacBool): TFlacbool; cdecl; external;
-function  FLAC__metadata_object_vorbiscomment_replace_comment(obj: PFlacStreamMetadataStruct;  entry: TFlacStreamMetadataVorbisCommentStruct; all: TFlacBool; copy: TFlacBool): TFlacbool; cdecl; external;
+function  FLAC__metadata_object_vorbiscomment_set_comment(obj: PFlacStreamMetadataStruct; comment_num: cunsigned; entry: PFlacStreamMetadataVorbisCommentEntryStruct; copy: TFlacBool): TFlacbool; cdecl; external;
+function  FLAC__metadata_object_vorbiscomment_insert_comment(obj: PFlacStreamMetadataStruct; comment_num: cunsigned; entry: PFlacStreamMetadataVorbisCommentEntryStruct; copy: TFlacBool): TFlacbool; cdecl; external;
+function  FLAC__metadata_object_vorbiscomment_append_comment(obj: PFlacStreamMetadataStruct; entry: PFlacStreamMetadataVorbisCommentEntryStruct; copy: TFlacBool): TFlacbool; cdecl; external;
+function  FLAC__metadata_object_vorbiscomment_replace_comment(obj: PFlacStreamMetadataStruct;  entry: PFlacStreamMetadataVorbisCommentEntryStruct; all: TFlacBool; copy: TFlacBool): TFlacbool; cdecl; external;
 function  FLAC__metadata_object_vorbiscomment_delete_comment(obj: PFlacStreamMetadataStruct; comment_num: cunsigned): TFlacbool; cdecl; external;
-function  FLAC__metadata_object_vorbiscomment_entry_from_name_value_pair(obj: PFlacStreamMetadataStruct): TFlacbool; cdecl; external;
+function  FLAC__metadata_object_vorbiscomment_entry_from_name_value_pair(entry: PFlacStreamMetadataVorbisCommentEntryStruct; field_name, field_value: PChar): TFlacbool; cdecl; external;
+function  FLAC__metadata_object_vorbiscomment_entry_to_name_value_pair(entry: PFlacStreamMetadataVorbisCommentEntryStruct; field_name, field_value: PPChar): TFlacbool; cdecl; external;
+function  FLAC__metadata_object_vorbiscomment_entry_matches(entry: PFlacStreamMetadataVorbisCommentEntryStruct; field_name: PChar; field_name_length: cunsigned): TFlacbool; cdecl; external;
 function  FLAC__metadata_object_vorbiscomment_find_entry_from(obj: PFlacStreamMetadataStruct; offset: cunsigned; field_name: PChar): cint; cdecl; external;
 function  FLAC__metadata_object_vorbiscomment_remove_entry_matching(obj: PFlacStreamMetadataStruct; field_name: PChar): cint; cdecl; external;
 function  FLAC__metadata_object_vorbiscomment_remove_entries_matching(obj: PFlacStreamMetadataStruct; field_name: PChar): cint; cdecl; external;
-
-// vorbis comment entry
-function  FLAC__metadata_object_vorbiscomment_entry_from_name_value_pair(entry: PFlacStreamMetadataVorbisCommentEntry; field_name, field_value: pchar): TFlacbool; cdecl; external;
-function  FLAC__metadata_object_vorbiscomment_entry_matches(entry: PFlacStreamMetadataVorbisCommentEntry; field_name: PChar; field_name_length: cunsigned): TFlacbool; cdecl; external;
 
 // cue sheet track
 function  FLAC__metadata_object_cuesheet_track_new: PFlacStreamMetadataCueSheetTrack; cdecl; external;

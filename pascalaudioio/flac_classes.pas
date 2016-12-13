@@ -370,8 +370,6 @@ begin
     fmtStreamInfo: Result :=  TFlacStreamMetadataStreamInfo.DefaultCreate(AType);
   end;
 
-  Result.FType:= AType;
-
   if Assigned(AObj) then
     Result.FMetadata:=AObj
   else

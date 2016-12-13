@@ -313,8 +313,8 @@ type
     Points: PFlacStreamMetadataSeekPoint;
   end;
 
-  PFlacStreamMetadataVorbisCommentEntry = ^TFlacStreamMetadataVorbisCommentEntry;
-  TFlacStreamMetadataVorbisCommentEntry = record
+  PFlacStreamMetadataVorbisCommentEntryStruct = ^TFlacStreamMetadataVorbisCommentEntryStruct;
+  TFlacStreamMetadataVorbisCommentEntryStruct = record
     Length: LongWord;
     Entry: PByte;
   end;
@@ -322,9 +322,9 @@ var
   FLAC__STREAM_METADATA_VORBIS_COMMENT_ENTRY_LENGTH_LEN: cunsigned; cvar; external;
 type
   TFlacStreamMetadataVorbisCommentStruct = record
-    VendorString: TFlacStreamMetadataVorbisCommentEntry;
+    VendorString: TFlacStreamMetadataVorbisCommentEntryStruct;
     NumComments: LongWord;
-    Comments: PFlacStreamMetadataVorbisCommentEntry;
+    Comments: PFlacStreamMetadataVorbisCommentEntryStruct;
   end;
 var
   FLAC__STREAM_METADATA_VORBIS_COMMENT_NUM_COMMENTS_LEN: cunsigned; cvar; external;
