@@ -18,53 +18,40 @@ unit pa_wav;
 interface
 
 uses
-  Classes, SysUtils, pa_base, fpwavformat;
+  Classes, SysUtils, pa_base, pa_stream, pa_register, fpwavformat;
 
 type
 
   { TPAWavSource }
 
-  TPAWavSource = class(TPAAudioSource, IPAStream)
+  TPAWavSource = class(TPAStreamSource, IPAStream)
   private
-    FOwnsStream: Boolean;
     FWavFormat: TWaveFormat;
-    FStream: TStream;
     FValid: Boolean;
     FCurrentChunk: TChunkHeader;
     procedure ReadHeader;
     function LoadNextChunk: Boolean;
-    function GetStream: TStream;
-    procedure SetStream(AValue: TStream);
   protected
+    procedure SetStream(AValue: TStream); override;
     function InternalOutputToDestination: Boolean; override;
-  public
-    // When a stream is assigned this object owns it and will free it.
-    constructor Create(AStream: TStream; AOwnsStream: Boolean); reintroduce;
-    destructor Destroy; override;
-    property Stream: TStream read GetStream write SetStream;
-    property OwnsStream: Boolean read FOwnsStream;
   end;
 
-  TPAWavDest = class(TPAAudioDestination, IPAStream)
+  TPAWavDest = class(TPAStreamDestination, IPAStream)
   private
     const
       cFileSizeOff = 4;
       cDataSizeOff = 40;
   private
-    FStream: TStream;
-    FOwnsStream: Boolean;
     FInited: Boolean;
     FFinished: Boolean;
     FDataSize: DWord;
-    function GetStream: TStream;
     procedure InitStream;
     procedure FinishStream;
   protected
     function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; override;
   public
-    constructor Create(AStream: TStream; AOwnsStream: Boolean); reintroduce;
-    destructor  Destroy; override;
-    property    Stream: TStream read GetStream;
+    constructor Create(AStream: TStream; AOwnsStream: Boolean); override;
+    property    Stream;
   end;
 
 implementation
@@ -101,11 +88,6 @@ begin
 end;
 
 { TPAWavDest }
-
-function TPAWavDest.GetStream: TStream;
-begin
-  Result := FStream;
-end;
 
 procedure TPAWavDest.InitStream;
 var
@@ -171,17 +153,8 @@ end;
 
 constructor TPAWavDest.Create(AStream: TStream; AOwnsStream: Boolean);
 begin
-  Inherited Create;
+  Inherited Create(AStream, AOwnsStream);
   Format:= afS16;
-  FStream := AStream;
-  FOwnsStream:=AOwnsStream;
-end;
-
-destructor TPAWavDest.Destroy;
-begin
-  if FOwnsStream then
-    FreeAndNil(FStream);
-  inherited Destroy;
 end;
 
 procedure TPAWavSource.ReadHeader;
@@ -190,6 +163,7 @@ var
   RCount: Integer;
 begin
   FValid := False;
+
   if not Assigned(FStream) then
     Exit;
   FStream.Seek(0, soBeginning);
@@ -224,19 +198,21 @@ begin
     Exit;
   end;
   FCurrentChunk.Size:=LeToN(FCurrentChunk.Size);
-  Result := True;
-end;
 
-function TPAWavSource.GetStream: TStream;
-begin
-  Result := FStream;
+  // fix datasize for illformed wav files.
+  if (FCurrentChunk.ID = AUDIO_CHUNK_ID_data) and (FCurrentChunk.Size = 0) then
+    FCurrentChunk.Size:=FStream.Size-FStream.Position;
+
+  Result := True;
 end;
 
 procedure TPAWavSource.SetStream(AValue: TStream);
 begin
-  if FStream = AValue then Exit;
-  FStream := AValue;
-  ReadHeader;
+  inherited SetStream(AValue);
+  if Assigned(AValue) then
+    ReadHeader
+  else
+    FValid := False;
 end;
 
 function TPAWavSource.InternalOutputToDestination: Boolean;
@@ -249,7 +225,6 @@ begin
   Result := False;
   if not FValid then
     Exit;
-
   while (WSize < SizeOf(Buf)) and not OutOfChunks do
   begin
     if FCurrentChunk.Size = 0 then
@@ -270,19 +245,8 @@ begin
     WriteToBuffer(Buf, WSize, not Result);
 end;
 
-constructor TPAWavSource.Create(AStream: TStream; AOwnsStream: Boolean);
-begin
-  inherited Create;
-  FOwnsStream:=AOwnsStream;
-  Stream := AStream;
-end;
-
-destructor TPAWavSource.Destroy;
-begin
-  if Assigned(FStream) and (FOwnsStream) then
-    FreeAndNil(FStream);
-  inherited Destroy;
-end;
-
+initialization
+  PARegister(partEncoder, TPAWavDest,   'Wave/PCM', '.wav' ,'RIFF', 4);
+  PARegister(partDecoder, TPAWavSource, 'Wave/PCM', '.wav');
 end.
 

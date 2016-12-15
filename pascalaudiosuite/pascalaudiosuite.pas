@@ -8,7 +8,7 @@ unit PascalAudioSuite;
 interface
 
 uses
-  pa_base, pa_lists, pa_resample, pa_enc_oggvorbis, pa_stream, pa_ladspa, pa_dec_oggvorbis, pa_noiseremoval, pa_cdaudio, pa_process, pa_wav, pa_binaural, pa_samplerate, pa_pulse_simple, pa_sox, pa_flac, LazarusPackageIntf;
+  pa_base, pa_lists, pa_resample, pa_enc_oggvorbis, pa_stream, pa_ladspa, pa_dec_oggvorbis, pa_noiseremoval, pa_cdaudio, pa_process, pa_wav, pa_binaural, pa_samplerate, pa_pulse_simple, pa_sox, pa_flac, pa_register, LazarusPackageIntf;
 
 implementation
 

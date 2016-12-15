@@ -20,6 +20,8 @@ interface
 uses
   Classes, SysUtils,
   pa_base,
+  pa_stream,
+  pa_register,
   ogg, vorbis,
   ctypes;
 
@@ -27,7 +29,7 @@ type
 
   { TPAOggVorbisEncoderLink }
 
-  TPAOggVorbisEncoderLink = class(TPAAudioLink)
+  TPAOggVorbisEncoderLink = class(TPAStreamDestination)
   private
     FBigEndian: Boolean;
     FOggStream: ogg_stream_state;
@@ -44,10 +46,11 @@ type
     procedure FinishEncode;
   protected
     function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; override;
-    procedure SignalDestinationsDone; override;
+    procedure EndOfData; override;
+    procedure SetStream(AValue: TStream); override;
 
   public
-    constructor Create; override;
+    constructor Create(AStream: TStream; AOwnsStream: Boolean); override;
     function   GetWrittenSeconds: QWord;
     procedure  AddComment(TagName: Utf8String; Content: Utf8String);
     property   Quality: cfloat read FQuality write FQuality;
@@ -97,8 +100,10 @@ begin
     if w then
     begin
       //WriteLn('ogg writing to destinations');
-      WriteToBuffer(Page.header^,Page.header_len, False);
-      WriteToBuffer(Page.body^,Page.body_len, False);
+      //WriteToBuffer(Page.header^,Page.header_len, False);
+      //WriteToBuffer(Page.body^,Page.body_len, False);
+      FStream.Write(Page.header^,Page.header_len);
+      FStream.Write(Page.body^,Page.body_len);
       //WriteLn('ogg wrote to destinations');
     end
     else
@@ -129,6 +134,8 @@ begin
   vorbis_dsp_clear(FDSPState);
   vorbis_info_clear(FInfo);
   vorbis_comment_clear(FComment);
+
+  FInited:=False;
 end;
 
 function TPAOggVorbisEncoderLink.InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64;
@@ -173,18 +180,26 @@ begin
     FinishEncode;}
 end;
 
-procedure TPAOggVorbisEncoderLink.SignalDestinationsDone;
+procedure TPAOggVorbisEncoderLink.EndOfData;
 begin
   FinishEncode;
-  inherited SignalDestinationsDone;
+  inherited EndOfData;
 end;
 
-constructor TPAOggVorbisEncoderLink.Create;
+procedure TPAOggVorbisEncoderLink.SetStream(AValue: TStream);
 begin
-  inherited Create;
+  inherited SetStream(AValue);
+  if Assigned(AValue) then
+  begin
+    FSerialNumber:=1;
+    vorbis_comment_init(FComment);
+  end;
+end;
+
+constructor TPAOggVorbisEncoderLink.Create(AStream: TStream; AOwnsStream: Boolean);
+begin
+  inherited Create(AStream, AOwnsStream);
   FFormat:=afRaw;
-  FSerialNumber:=1;
-  vorbis_comment_init(FComment);
 end;
 
 function TPAOggVorbisEncoderLink.GetWrittenSeconds: QWord;
@@ -199,5 +214,7 @@ begin
   vorbis_comment_add_tag(FComment,PChar(TagName),PChar(Content));
 end;
 
+initialization
+  PARegister(partEncoder, TPAOggVorbisEncoderLink, 'OGG/Vorbis', '.ogg', 'OggS');
 end.
 

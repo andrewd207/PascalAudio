@@ -11,19 +11,17 @@ uses
 var
   SourceFlac: TPAFlacSource;
   DestStream: TPAStreamDestination;
-
-  OutputStream: THandleStream;
-
 procedure CreateObjects;
 var
   InputStream: TFileStream;
+  OutputStream: THandleStream;
 begin
 
   InputStream := TFileStream.Create(ParamStr(1), fmOpenRead);
   OutputStream := THandleStream.Create(StdOutputHandle); // :)
 
   SourceFlac := TPAFlacSource.Create(InputStream, True);
-  DestStream := TPAStreamDestination.Create(OutputStream);
+  DestStream := TPAStreamDestination.Create(OutputStream, True);
   DestStream.DataSource := SourceFlac;
 
   // write some info to stderr since stdout will contain raw audio data
@@ -36,7 +34,6 @@ procedure FreeObjects;
 begin
   SourceFlac.Free;
   DestStream.Free;
-  OutputStream.Free;
 end;
 
 procedure Decode;

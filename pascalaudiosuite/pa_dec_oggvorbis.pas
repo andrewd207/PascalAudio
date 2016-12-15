@@ -20,6 +20,7 @@ interface
 uses
   Classes, SysUtils,
   pa_base,
+  pa_register,
   pa_stream,
   ctypes,
   OggHfObject;
@@ -27,14 +28,14 @@ uses
 type
   { TPAOggVorbisDecoderSource }
 
-  TPAOggVorbisDecoderSource = class(TPAStreamSource, IPAPlayable)
+  TPAOggVorbisDecoderSource = class(TPAStreamSource, IPAPlayable, IPAStream)
   private
-    FStream: TStream;
     FInited: Boolean;
     Fogg: TOggDecFloat;
-    procedure SetStream(AValue: TStream);
     function InitOgg: Boolean;
+    procedure DeInitOgg;
   protected
+    procedure SetStream(AValue: TStream); override;
     function InternalOutputToDestination: Boolean; override;
     procedure SignalDestinationsDone; override;
     // IPAPlayable
@@ -43,14 +44,14 @@ type
     procedure SetPosition(AValue: Double);
     function  GetMaxPosition: Double;
   public
-    constructor Create; override;
+    constructor Create(AStream: TStream; AOwnsStream: Boolean); override;
     procedure InitValues;
     //IPAPlayable
     procedure Play;
     procedure Pause;
     procedure Stop;
     //IStreamSource
-    property Stream: TStream read FStream write SetStream;
+    property Stream;
     //IPAPlayable
     property  Position: Double read GetPosition write SetPosition;
     property  MaxPosition: Double read GetMaxPosition;
@@ -64,8 +65,12 @@ procedure TPAOggVorbisDecoderSource.SetStream(AValue: TStream);
 begin
   if FStream=AValue then Exit;
   if FStream <> nil then
+  begin
     StopData;
-  FStream:=AValue;
+    DeInitOgg;
+  end;
+  inherited SetStream(AValue);
+
 end;
 
 function TPAOggVorbisDecoderSource.InitOgg: Boolean;
@@ -83,6 +88,14 @@ begin
   Format:=afFloat32;
   FInited:=True;
   Result := True;
+end;
+
+procedure TPAOggVorbisDecoderSource.DeInitOgg;
+begin
+  if not FInited then
+    Exit;
+
+  FreeAndNil(FOgg);
 end;
 
 function TPAOggVorbisDecoderSource.InternalOutputToDestination: Boolean;
@@ -145,9 +158,9 @@ begin
   Result := Fogg.TimeLength;
 end;
 
-constructor TPAOggVorbisDecoderSource.Create;
+constructor TPAOggVorbisDecoderSource.Create(AStream: TStream; AOwnsStream: Boolean);
 begin
-  inherited Create;
+  inherited Create(AStream, AOwnsStream);
   Format:=afFloat32;
 end;
 
@@ -177,6 +190,9 @@ procedure TPAOggVorbisDecoderSource.Stop;
 begin
 
 end;
+
+initialization
+  PARegister(partDecoder, TPAOggVorbisDecoderSource, 'OGG/Vorbis', '.ogg', 'OggS', 4);
 
 end.
 

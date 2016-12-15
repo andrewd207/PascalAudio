@@ -103,7 +103,9 @@ type
   IPAStream = interface
     ['IPAStream']
     function GetStream: TStream;
-    property Stream: TStream read GetStream;
+    procedure SetStream(AValue: TStream);
+    property Stream: TStream read GetStream write SetStream;
+    property OwnsStream: Boolean;
   end;
 
 
@@ -146,6 +148,7 @@ type
 
   { TPAAudioSource }
 
+  TPAAudioSourceClass = class of TPAAudioSource;
   // First link in a chain.
   TPAAudioSource = class(TPAAudioInformationBase, IPAAudioSource)
   private
@@ -236,6 +239,7 @@ type
 
   TPAAudioDataEndEvent = procedure(Sender: IPAAudioDestination; AUserObj: TObject) of object;
 
+  TPAAudioDestinationClass = class of TPAAudioDestination;
   // last link in a chain
   TPAAudioDestination = class(TPAAudioInformationBase, IPAAudioDestination)
   private
@@ -273,6 +277,7 @@ type
     property  OnDataEnded[AUserObj: TObject]: TPAAudioDataEndEvent read GetOnDataEnded write SetOnDataEnded;
   end;
 
+  TPAAudioLinkClass = class of TPAAudioLink;
   // TAudioLink has something before and something after it in the chain
   TPAAudioLink = class(TPAAudioSource, IPAAudioSource, IPAAudioDestination, IPAAudioInformation)
   private
@@ -536,10 +541,10 @@ begin
     repeat
       Res := WaitEvent.WaitFor(1000);
       if not (Res in [wrSignaled, wrTimeout]) then
-        WriteLn('Pool: WaitFor = ', Res);
+        ;//WriteLn(StdErr, 'Pool: WaitFor = ', Res);
       if Res = wrTimeout then
       begin
-        WriteLn('Pool WaitforTimedOut waiting for buffer Available = ', FBufferList.Count);
+        //WriteLn(StdErr, 'Pool WaitforTimedOut waiting for buffer Available = ', FBufferList.Count);
         Result := PAudioBuffer(FBufferList.GetItem);
         if Result <> nil then
           Break;
@@ -551,7 +556,7 @@ begin
     WaitEvent.Buffer:=nil;
     WaitEvent.Free;
     if Result = nil then
-      WriteLn('Error nil Buffer from waitlist!');
+      WriteLn(StdErr, 'Error nil Buffer from waitlist!');
 
   end;
 
@@ -1170,7 +1175,7 @@ begin
     end;
     wrTimeout: ; // maybe reset event after a while?
     else
-      WriteLn(ClassName,' waitfor = ', Res);
+      ;//WriteLn(StdErr, ClassName,' waitfor = ', Res);  // Triggered when Freed
 
     end;
 

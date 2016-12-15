@@ -18,7 +18,7 @@ unit pa_pulse_simple;
 interface
 {$IFDEF USEPULSE}
 uses
-  Classes, SysUtils, pa_base, pulse_simple;
+  Classes, SysUtils, pa_base, pa_register, pulse_simple;
 
 
 type
@@ -104,6 +104,8 @@ destructor TPAPulseDestination.Destroy;
 begin
   inherited Destroy;
 end;
+initialization
+  PARegister(partDeviceOut, TPAPulseDestination, 'PulseAudio');
 {$ENDIF}
 end.
 

@@ -18,31 +18,46 @@ unit pa_flac;
 interface
 
 uses
-  Classes, SysUtils, pa_base, flac_classes;
+  Classes, SysUtils, pa_base, flac_classes, pa_register, pa_stream;
 
 type
-  TPAFlacSource = class (TPAAudioSource, IPAStream)
+  TPAFlacSource = class (TPAStreamSource, IPAStream)
+  protected
+    procedure SetStream(AValue: TStream); override;
   private
-    FOwnsStream: Boolean;
-    FStream: TStream;
     FFlac: TFlacStreamDecoder;
-    function GetStream: TStream;
     function HandleData(Sender: TFlacStreamDecoder; ASamples: Integer; AChannels: Integer; AChannelData: PPLongInt): Boolean;
   protected
     function InternalOutputToDestination: Boolean; override;
   public
-    constructor Create(AStream: TStream; AOwnsStream: Boolean); reintroduce;
-    destructor Destroy; override;
-    property Stream: TStream read GetStream;
+    property Stream;
   end;
 
 implementation
 
 { TPAFlacSource }
 
-function TPAFlacSource.GetStream: TStream;
+procedure TPAFlacSource.SetStream(AValue: TStream);
 begin
-  Result := FStream;
+  if Assigned(FFlac) then
+    FreeAndNil(FFlac);
+
+  inherited SetStream(AValue);
+
+  if not Assigned(FStream) then
+    Exit;
+
+  FFlac := TFlacStreamDecoder.Create(FStream, False);
+  FFlac.OnOutput:=@HandleData;
+  FFlac.ProcessUntilEndOfMetadata;
+
+  Channels:=FFlac.Channels;
+  SamplesPerSecond:=FFlac.SampleRate;
+  case FFlac.BitsPerSample of
+    16: Format:=afS16;
+  else
+    raise Exception.Create('unsupported flac data type');
+  end;
 end;
 
 function TPAFlacSource.HandleData(Sender: TFlacStreamDecoder; ASamples: Integer; AChannels: Integer; AChannelData: PPLongInt): Boolean;
@@ -73,27 +88,7 @@ begin
   end;
 end;
 
-constructor TPAFlacSource.Create(AStream: TStream; AOwnsStream: Boolean);
-begin
-  Inherited Create;
-  FFlac := TFlacStreamDecoder.Create(AStream, False);
-  FFlac.OnOutput:=@HandleData;
-  FFlac.ProcessUntilEndOfMetadata;
-
-  Channels:=FFlac.Channels;
-  SamplesPerSecond:=FFlac.SampleRate;
-  case FFlac.BitsPerSample of
-    16: Format:=afS16;
-  else
-    raise Exception.Create('unsupported flac data type');
-  end;
-end;
-
-destructor TPAFlacSource.Destroy;
-begin
-  FFlac.Free;
-  inherited Destroy;
-end;
-
+initialization
+  PARegister(partDecoder, TPAFlacSource, 'FLAC', '.flac', 'fLaC', 4);
 end.
 

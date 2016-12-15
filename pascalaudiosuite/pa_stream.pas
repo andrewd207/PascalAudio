@@ -24,28 +24,46 @@ type
 
   { TPAStreamSource }
 
+  TPAStreamSourceClass = class of TPAStreamSource;
   TPAStreamSource = class(TPAAudioSource, IPAStream)
-  private
+  protected
     FStream: TStream;
-    function GetStream: TStream;
+    FOwnsStream: Boolean;
+    procedure SetStream(AValue: TStream); virtual;
+    function GetStream: TStream; virtual;
+  private
+    function GetOwnsStream: Boolean;
+    procedure SetOwnsStream(AValue: Boolean);
+
   protected
     function InternalOutputToDestination: Boolean; override;
   public
-    property  Stream: TStream read GetStream write FStream;
+    constructor Create; override; // you must set ownsstream and stream
+    constructor Create(AStream: TStream; AOwnsStream: Boolean = True); virtual;
+    destructor Destroy; override;
+    property  Stream: TStream read GetStream write SetStream;
+    property  OwnsStream: Boolean read GetOwnsStream write SetOwnsStream;
   end;
 
   { TPAStreamDestination }
 
+  TPAStreamDestinationClass = class of TPAStreamDestination;
   TPAStreamDestination = class(TPAAudioDestination, IPAStream)
   private
-    FStream: TStream;
-    function GetStream: TStream;
+    FOwnsStream: Boolean;
+    function GetOwnsStream: Boolean;
+    procedure SetOwnsStream(AValue: Boolean);
   protected
+    FStream: TStream;
+    function GetStream: TStream; virtual;
+    procedure SetStream(AValue: TStream); virtual;
     function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; override;
     procedure EndOfData; override;
   public
-    constructor Create(AStream: TStream);
-    property  Stream: TStream read GetStream write FStream;
+    constructor Create(AStream: TStream; AOwnsStream: Boolean); virtual;
+    destructor  Destroy; override;
+    property  Stream: TStream read GetStream write SetStream;
+    property  OwnsStream: Boolean read GetOwnsStream write SetOwnsStream;
   end;
 
 implementation
@@ -55,6 +73,23 @@ implementation
 function TPAStreamSource.GetStream: TStream;
 begin
   Result := FStream;
+end;
+
+function TPAStreamSource.GetOwnsStream: Boolean;
+begin
+  Result := FOwnsStream;
+end;
+
+procedure TPAStreamSource.SetOwnsStream(AValue: Boolean);
+begin
+  FOwnsStream := AValue;
+end;
+
+procedure TPAStreamSource.SetStream(AValue: TStream);
+begin
+  if Assigned(FStream) and (AValue <> FStream) and FOwnsStream then
+    FreeAndNil(FStream);
+  FStream := AValue;
 end;
 
 function TPAStreamSource.InternalOutputToDestination: Boolean;
@@ -73,11 +108,47 @@ begin
 
 end;
 
+constructor TPAStreamSource.Create;
+begin
+  Create(nil, True);
+end;
+
+constructor TPAStreamSource.Create(AStream: TStream; AOwnsStream: Boolean);
+begin
+  inherited Create;
+  OwnsStream := AOwnsStream;
+  Stream := AStream;
+end;
+
+destructor TPAStreamSource.Destroy;
+begin
+  if FOwnsStream and Assigned(FStream) then
+    FreeAndNil(FStream);
+  inherited Destroy;
+end;
+
 { TPAStreamDestination }
 
 function TPAStreamDestination.GetStream: TStream;
 begin
   Result := FStream;
+end;
+
+function TPAStreamDestination.GetOwnsStream: Boolean;
+begin
+  Result := FOwnsStream;
+end;
+
+procedure TPAStreamDestination.SetOwnsStream(AValue: Boolean);
+begin
+  FOwnsStream := AValue;
+end;
+
+procedure TPAStreamDestination.SetStream(AValue: TStream);
+begin
+  if Assigned(FStream) and FOwnsStream then
+    FreeAndNil(FStream);
+  FStream := AValue;
 end;
 
 function TPAStreamDestination.InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64;
@@ -97,11 +168,17 @@ begin
   FBufferManager.Flush;
 end;
 
-constructor TPAStreamDestination.Create(AStream: TStream);
+constructor TPAStreamDestination.Create(AStream: TStream; AOwnsStream: Boolean);
 begin
   FStream := AStream;
   inherited Create;
   Format := afRaw;
+end;
+
+destructor TPAStreamDestination.Destroy;
+begin
+  Stream := nil; // this will free the stream if we own it.
+  inherited Destroy;
 end;
 
 { TPAStreamSource }
