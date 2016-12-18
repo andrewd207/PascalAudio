@@ -1057,7 +1057,7 @@ begin
           begin
            // make sure this is sent before we process more data
            // insert message before other data messages but after other messages like PAM_ObjectIsDestroying
-           WriteLn('Couldn''t send buffer re-queing it');
+           //WriteLn('Couldn''t send buffer re-queing it');
            FMsgQueue.InsertBefore([PAM_Data, PAM_SendBuffer, PAM_DataEnd], Msg);
            Msg := nil; // to avoid freeing since it's back in the queue
           end
@@ -1320,7 +1320,6 @@ procedure TPAAudioSource.StopData;
 begin
   if FWorking then
   FMsgQueue.PostMessage(PAM_StopWorking);
-  FWorking:=False;
 end;
 
 constructor TPAAudioLink.Create;
