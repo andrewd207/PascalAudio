@@ -9,7 +9,7 @@
         <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
       </SearchPaths>
     </CompilerOptions>
-    <Files Count="19">
+    <Files Count="20">
       <Item1>
         <Filename Value="ladspa.pas"/>
         <UnitName Value="ladspa"/>
@@ -86,6 +86,10 @@
         <Filename Value="flac_decode.inc"/>
         <Type Value="Binary"/>
       </Item19>
+      <Item20>
+        <Filename Value="paio_messagequeue.pas"/>
+        <UnitName Value="paio_messagequeue"/>
+      </Item20>
     </Files>
     <RequiredPkgs Count="1">
       <Item1>

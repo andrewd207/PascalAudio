@@ -38,7 +38,7 @@ procedure PARegister(AType: TPARegisterType; AClass: TClass; AName: String; AExt
 function  PARegisteredGet(AType: TPARegisterType; AName: String): TClass;
 
 // enumerate
-function PARegisteredGetList(AType: TPARegisterType): TStrings;
+function PARegisteredGetList(AType: TPARegisterType; const AExtentions: TStrings = nil): TStrings;
 
 // specific registers. can be used instead of PARegister
 procedure PARegisterDecoder(ASource: TPAStreamSourceClass; AName: String; AExtension: String; AMagic: TFileMagic);
@@ -263,7 +263,7 @@ begin
   Result := nil;
 end;
 
-function PARegisteredGetList(AType: TPARegisterType): TStrings;
+function PARegisteredGetList(AType: TPARegisterType; const AExtentions: TStrings): TStrings;
 var
   i: TAudioClassEntry;
   List: TAudioClassList;
@@ -281,6 +281,8 @@ begin
   for i in List do
   begin
     Result.AddObject(i.Name, TObject(i.AudioClass));
+    if Assigned(AExtentions) then
+      AExtentions.Add(i.Extention);
   end;
 
   if Result.Count = 0 then

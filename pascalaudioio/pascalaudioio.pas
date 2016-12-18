@@ -8,7 +8,7 @@ unit PascalAudioIO;
 interface
 
 uses
-  ladspa, samplerate, resample, pa_ringbuffer, ladspa_classes, audacity_noiseremoval, audacity_realfftf, OggHfObject, flac_classes, paio_types, bs2b, paio_channelhelper, paio_utils, noiseremovalmultichannel, LazarusPackageIntf;
+  ladspa, samplerate, resample, pa_ringbuffer, ladspa_classes, audacity_noiseremoval, audacity_realfftf, OggHfObject, flac_classes, paio_types, bs2b, paio_channelhelper, paio_utils, noiseremovalmultichannel, paio_messagequeue, LazarusPackageIntf;
 
 implementation
 

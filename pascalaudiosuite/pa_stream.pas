@@ -122,6 +122,7 @@ end;
 
 destructor TPAStreamSource.Destroy;
 begin
+  DestroyWaitSync;
   if FOwnsStream and Assigned(FStream) then
     FreeAndNil(FStream);
   inherited Destroy;

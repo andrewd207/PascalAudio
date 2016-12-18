@@ -22,6 +22,7 @@ uses
   pa_base,
   pa_register,
   pa_stream,
+  paio_messagequeue,
   ctypes,
   OggHfObject;
 
@@ -38,11 +39,13 @@ type
     procedure SetStream(AValue: TStream); override;
     function InternalOutputToDestination: Boolean; override;
     procedure SignalDestinationsDone; override;
+    procedure HandleMessage(var AMsg: TPAIOMessage); override;
     // IPAPlayable
     function  CanSeek: Boolean;
     function  GetPosition: Double;
     procedure SetPosition(AValue: Double);
     function  GetMaxPosition: Double;
+
   public
     constructor Create(AStream: TStream; AOwnsStream: Boolean); override;
     procedure InitValues;
@@ -128,6 +131,15 @@ begin
   inherited SignalDestinationsDone;
 end;
 
+procedure TPAOggVorbisDecoderSource.HandleMessage(var AMsg: TPAIOMessage);
+begin
+  case AMsg.Message of
+    PAM_Seek:
+      if FInited then
+        Fogg.TimePosition:=AMsg.Data;
+  end;
+end;
+
 function TPAOggVorbisDecoderSource.CanSeek: Boolean;
 begin
   Result := True;
@@ -146,8 +158,7 @@ begin
   if not FInited then
     Exit;
 
-  Fogg.TimePosition:=AValue;
-
+  FMsgQueue.PostMessage(PAM_Seek, AValue);
 end;
 
 function TPAOggVorbisDecoderSource.GetMaxPosition: Double;

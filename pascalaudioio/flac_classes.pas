@@ -286,6 +286,7 @@ type
     FChannels: Integer;
     FSampleRate: Integer;
     FBitsperSample: Integer;
+    FDecodedSamplePosition: QWord;
     function GetMd5Checking: Boolean;
     function GetResolvedStateString: String;
     function GetState: TFlacStreamDecoderState;
@@ -320,6 +321,7 @@ type
     function    SampleRate: Integer;
     function    BlockSize: Integer;
     function    DecodePosition: QWord;
+    function    DecodedSamplePosition: QWord;
     function    Flush: Boolean;
     function    Reset: Boolean;
     function    ProcessSingle: Boolean;
@@ -1088,6 +1090,10 @@ var
   lFrame: PFlacFrame absolute Frame;
 begin
   try
+    // update where we are samplewise in the uncompressed output
+    if lFrame^.Header.NumberType = ffntSampleNumber then
+      lDecoder.FDecodedSamplePosition:=lFrame^.Header.number.SampleNumber;
+
     if lDecoder.HandleWriteDecodedData(lFrame^.Header.Blocksize, lFrame^.Header.Channels, buffer) then
       Result := fsdwsContinue
     else
@@ -1101,7 +1107,6 @@ class procedure TFlacStreamDecoder.ClassStreamMetadata(Decoder: Pointer; metadat
 var
   lDecoder: TFlacStreamDecoder absolute client_data;
   lMetadata: PFlacStreamMetadataStruct absolute metadata;
-  lType: TFlacMetadataType;
   lMetadataObject : TFlacStreamMetadata;
 begin
   lMetadataObject := TFlacStreamMetadata.CreateInstance(lMetadata^.Type_, lMetadata);
@@ -1229,6 +1234,11 @@ function TFlacStreamDecoder.DecodePosition: QWord;
 begin
   if not FLAC__stream_decoder_get_decode_position(FDecoder, @Result) then
     Result := 0;
+end;
+
+function TFlacStreamDecoder.DecodedSamplePosition: QWord;
+begin
+  Result := FDecodedSamplePosition;
 end;
 
 function TFlacStreamDecoder.Flush: Boolean;
