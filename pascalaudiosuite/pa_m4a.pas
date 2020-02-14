@@ -68,7 +68,7 @@ begin
   Result := FSampleIndex < Length(FSampleTable);
   if not Result then
     Exit;
-  Writeln('Reading Index: ', FSampleIndex);
+
   FSampleSize := FSampleTable[FSampleIndex];
 
   lChunkIndex := FChunkTable.SampleIndexToChunkIndex(1, FSampleIndex, lFirstIndex);
@@ -82,8 +82,8 @@ begin
   if Assigned(FCodec) then
     FCodec.Filter(@FBuffer[0], FSampleSize);
   Inc(FSampleIndex);
-  Write(Pred(FSampleIndex), ': ');
-  {for i := 0 to 7 do
+  {Write(Pred(FSampleIndex), ': ');
+  for i := 0 to 7 do
     Write('0x'+HexStr(FBuffer[i], 2)+' ');
   WriteLn;}
 end;
@@ -117,7 +117,7 @@ begin
 
   lSampleTable := TstszAtom(FContainer.Atoms.FindAtom('moov/trak/mdia/minf/stbl/stsz'));
   SetLength(FSampleTable, lSampleTable.SampleCount);
-  Writeln(Length(FSampleTable), ' samples');
+  //Writeln(Length(FSampleTable), ' samples');
   lSampleTable.CopySampleTable(@FSampleTable[0]);
 
   lSampleOffSet := TstcoAtom(FContainer.Atoms.FindAtom('moov/trak/mdia/minf/stbl/stco'));
@@ -128,8 +128,8 @@ begin
 
 
   lmp4aAtom := TSoundSampleDecriptionAtom(lstsdAtom.Atoms.Atom[0]);
-  WriteLn(lmp4aAtom.ClassName);
-  WriteLn(lmp4aAtom.AtomName.Chars);
+  //WriteLn(lmp4aAtom.ClassName);
+  //WriteLn(lmp4aAtom.AtomName.Chars);
 
   if MP4LookupCodec(lmp4aAtom.AtomName, lCodecClass) then
   begin
@@ -149,19 +149,15 @@ begin
 
   FDecoder := TAACDecoder.Create;
   lDecoderConfig := FDecoder.Config;
-  WriteLn(FDecoder.GetErroMessage(FDecoder.LastResult));;
+  //WriteLn(FDecoder.GetErroMessage(FDecoder.LastResult));;
   lDecoderConfig^.outputFormat:=ord(FAAD_FMT_FLOAT);
-  //lDecoderConfig^.downMatrix:=0;
-  //lDecoderConfig^.defObjectType:=Ord(otLC);
-  //lDecoderConfig^.defSampleRate:=Trunc(lmp4aAtom.SampleRate);
-  //lDecoderConfig^.dontUpSampleImplicitSBR:= False;
   FDecoder.Config := lDecoderConfig;
 
   FDecoder.Init2(@lConfig, 2);
 
   FDecoder.AudioSpecificConfig(@lConfig, 2, @lmp4ASC);
 
-  WriteLn(FDecoder.Channels);
+  //WriteLn(FDecoder.Channels);
   Channels:=FDecoder.Channels;
   SamplesPerSecond:=FDecoder.SampleRate;
 
@@ -211,6 +207,7 @@ begin
     begin
       WriteToBuffer(lRes^,FFrame.samples*4, False);
     end;
+    {
 
     WriteLn(SysUtils.Format('Dec Bytes: %d, data := 0x%s Samples: %d', [FFrame.bytesconsumed, Hexstr(PtrUint(lRes), 16), FFrame.samples]));
     //if FFrame.;
@@ -218,7 +215,7 @@ begin
     begin
 
      writeln;
-    end;
+    end;     }
   end;
 
   //sleep(1000);
@@ -235,27 +232,8 @@ begin
   Format:=afFloat32;
 end;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+initialization
+  PARegister(partDecoder, TPAM4ADecoderSource, 'MP4audio', '.m4a', 'ftyp', 4, 4); // ftyp is at 4 offset
 
 end.
 

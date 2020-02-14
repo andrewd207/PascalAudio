@@ -34,7 +34,7 @@ const
   cPAFileMagicEmpty = #0#0#0#0;
 
 // generic register
-procedure PARegister(AType: TPARegisterType; AClass: TClass; AName: String; AExtension: String = ''; AMagic: TFileMagic = cPAFileMagicEmpty; AMagicLen: Integer = 4);
+procedure PARegister(AType: TPARegisterType; AClass: TClass; AName: String; AExtension: String = ''; AMagic: String = cPAFileMagicEmpty; AMagicLen: Integer = 4; AMagicOffset: Integer = 0);
 function  PARegisteredGet(AType: TPARegisterType; AName: String): TClass;
 
 // enumerate
@@ -76,6 +76,7 @@ type
     Extention: String;
     Magic: TFileMagic;
     MagicLen: Integer;
+    MagicOffset: Integer;
   end;
 
   TAudioClassList = specialize TFPGObjectList<TAudioClassEntry>;
@@ -111,7 +112,9 @@ begin
   EncoderList.Add(lDest);
 end;
 
-procedure PARegister(AType: TPARegisterType; AClass: TClass; AName: String; AExtension: String; AMagic: TFileMagic; AMagicLen: Integer);
+procedure PARegister(AType: TPARegisterType; AClass: TClass; AName: String;
+  AExtension: String; AMagic: String; AMagicLen: Integer; AMagicOffset: Integer
+  );
 var
   Entry: TAudioClassEntry;
   List: TAudioClassList;
@@ -128,8 +131,9 @@ begin
   Entry.Name:=AName;
   Entry.AudioClass:=AClass;
   Entry.Extention:=AExtension;
-  Entry.Magic := AMagic;
+  Entry.Magic := @AMagic[1];
   Entry.MagicLen:=AMagicLen;
+  Entry.MagicOffset:=AMagicOffset;
   List.Add(Entry);
 end;
 
@@ -165,7 +169,7 @@ var
 begin
   for i in DecoderList do
   begin
-    if CompareMem(@i.Magic[0], @AMagic[0], i.MagicLen) then
+    if CompareMem(@i.Magic[0], @AMagic[i.MagicOffset], i.MagicLen) then
       Exit(TPAStreamSourceClass(i.AudioClass));
   end;
 
@@ -180,7 +184,7 @@ begin
   Result := nil;
   lSavedPos := AStream.Position;
   AStream.Position:=0;
-  SetLength(lMagic, 4);
+  SetLength(lMagic, 8);
   if AStream.Read(lMagic[0], SizeOf(lMagic)) = SizeOf(lMagic) then
     Result := PARegisteredGetDecoderClass(lMagic);
 
