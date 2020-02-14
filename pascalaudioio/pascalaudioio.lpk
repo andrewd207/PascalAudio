@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CONFIG>
-  <Package Version="4">
+  <Package Version="5">
     <Name Value="PascalAudioIO"/>
     <Type Value="RunAndDesignTime"/>
     <CompilerOptions>
@@ -9,7 +9,7 @@
         <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
       </SearchPaths>
     </CompilerOptions>
-    <Files Count="20">
+    <Files Count="26">
       <Item1>
         <Filename Value="ladspa.pas"/>
         <UnitName Value="ladspa"/>
@@ -90,6 +90,30 @@
         <Filename Value="paio_messagequeue.pas"/>
         <UnitName Value="paio_messagequeue"/>
       </Item20>
+      <Item21>
+        <Filename Value="paio_faad2.pas"/>
+        <UnitName Value="paio_faad2"/>
+      </Item21>
+      <Item22>
+        <Filename Value="paio_mmdevice.pas"/>
+        <UnitName Value="paio_mmdevice"/>
+      </Item22>
+      <Item23>
+        <Filename Value="mp4codec.pas"/>
+        <UnitName Value="mp4codec"/>
+      </Item23>
+      <Item24>
+        <Filename Value="mp4codec_mp4a.pas"/>
+        <UnitName Value="mp4codec_mp4a"/>
+      </Item24>
+      <Item25>
+        <Filename Value="quicktimeatoms.pas"/>
+        <UnitName Value="quicktimeatoms"/>
+      </Item25>
+      <Item26>
+        <Filename Value="quicktimecontainer.pas"/>
+        <UnitName Value="quicktimecontainer"/>
+      </Item26>
     </Files>
     <RequiredPkgs Count="1">
       <Item1>
