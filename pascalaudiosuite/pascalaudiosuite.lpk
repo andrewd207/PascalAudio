@@ -11,7 +11,7 @@
       <Conditionals Value="if SrcOS = 'unix' then
   CustomOptions+='-dUSEPULSE';"/>
     </CompilerOptions>
-    <Files Count="17">
+    <Files Count="19">
       <Item1>
         <Filename Value="pa_base.pas"/>
         <UnitName Value="pa_base"/>
@@ -80,6 +80,14 @@
         <Filename Value="pa_register.pas"/>
         <UnitName Value="pa_register"/>
       </Item17>
+      <Item18>
+        <Filename Value="pa_mmdevice.pas"/>
+        <UnitName Value="pa_mmdevice"/>
+      </Item18>
+      <Item19>
+        <Filename Value="pa_m4a.pas"/>
+        <UnitName Value="pa_m4a"/>
+      </Item19>
     </Files>
     <RequiredPkgs Count="3">
       <Item1>
