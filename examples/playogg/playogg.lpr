@@ -6,13 +6,19 @@ uses
   {$IFDEF UNIX}
   cthreads,
   {$ENDIF}
-  Classes, pa_dec_oggvorbis, pa_pulse_simple, sysutils;
+  Classes, pa_dec_oggvorbis,
+  pa_base,
+  {$IFDEF UNIX}
+  pa_pulse_simple,
+  {$else}
+  pa_mmdevice,
+  {$ENDIF}
+  sysutils;
 
 var
   ogg: TPAOggVorbisDecoderSource;
-  pulse: TPAPulseDestination;
+  Dest : TPAAudioDestination;
   FileName: String;
-
 begin
   FileName := ParamStr(1);
   if (FileName = '') or not FileExists(FileName) then
@@ -21,15 +27,17 @@ begin
     Exit;
   end;
   // create ogg decoder
-  ogg := TPAOggVorbisDecoderSource.Create;
+  ogg := TPAOggVorbisDecoderSource.Create(TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone), True);
 
-  // create pulse destination
-  pulse := TPAPulseDestination.Create;
+  // create audio out destination
+  {$IFDEF UNIX}
+    Dest := TPAPulseDestination.Create;
+  {$else}
+    Dest := TPAMMDestination.Create;
+  {$ENDIF}
+
   // assign ogg as source of data
-  pulse.DataSource := ogg;
-
-  // set tthe file stream ogg reads from
-  ogg.Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
+  Dest.DataSource := ogg;
 
   // start the chain from the first link.
   ogg.StartData;
@@ -37,9 +45,11 @@ begin
   sleep(1000);
   //ogg.Position:=222;
   // while decoding sleep
-  while ogg.Working do
+  while Dest.Working  do
     Sleep(1);
-  pulse.free;
+  Dest.Terminate;
+  Dest.WaitFor;
+  Dest.free;
   ogg.free;
 end.
 

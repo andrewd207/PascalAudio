@@ -837,7 +837,7 @@ begin
   FDataIsEnded:=True;
   FBufferManager.Flush; // marks any buffered data as ready to be processed
   FMsgQueue.PostMessage(PAM_DataEnd);
-  Synchronize(@DoOnDataEnded);
+  Queue(@DoOnDataEnded);
 end;
 
 function TPAAudioDestination.GetObject: TObject;
@@ -1253,6 +1253,8 @@ begin
   //WriteLn(ClassName,' telling destinations done');
   for i := 0 to FDestinations.Count-1 do
     IPAAudioDestination(FDestinations[i]).EndOfData;
+
+
 end;
 
 function TPAAudioSource.GetSourceObject: TObject;

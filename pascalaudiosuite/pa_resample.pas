@@ -17,6 +17,8 @@ unit pa_resample;
 
 interface
 
+{$IFDEF UNIX}
+
 uses
   Classes, SysUtils, unixtype, pa_base, resample;
 
@@ -155,7 +157,9 @@ end;
 
 { TStereoFloat }
 
-
+{$ELSE}
+implementation
+{$ENDIF}
 
 end.
 
