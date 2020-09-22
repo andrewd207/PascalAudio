@@ -32,7 +32,7 @@ type
 
   { TPAM4ADecoderSource }
 
-  TPAM4ADecoderSource = class(TPAStreamSource, {IPAPlayable,} IPAStream)
+  TPAM4ADecoderSource = class(TPAStreamSource, IPAPlayable, IPAStream)
   private
     FInited: Boolean;
     FDecoder: TAACDecoder;
@@ -41,6 +41,7 @@ type
     FSampleTable: array of LongWord;
     FChunkOffset: array of LongWord;
     FChunkTable: TstscAtom;
+    FTimeToSample: TsttsAtom;
     FFrame: TNeAACDecFrameInfo;
     FBuffer: array[0..1023] of Byte;
     FSampleSize: Integer;
@@ -51,7 +52,17 @@ type
   protected
     procedure SetStream(AValue: TStream); override;
     function InternalOutputToDestination: Boolean; override;
+    procedure HandleMessage(var AMsg: TPAIOMessage); override;
+    function  GetPosition: Double;
+    procedure SetPosition(AValue: Double);
+    function  GetMaxPosition: Double;
   public
+    function  CanSeek: Boolean;
+    procedure Play;
+    procedure Pause;
+    procedure Stop;
+    property  Position: Double read GetPosition write SetPosition;
+    property  MaxPosition: Double read GetMaxPosition;
     constructor Create(AStream: TStream; AOwnsStream: Boolean=True); override;
   end;
 
@@ -68,8 +79,9 @@ begin
   Result := FSampleIndex < Length(FSampleTable);
   if not Result then
     Exit;
-
+  //WriteLn('Sample index: ', FSampleIndex);
   FSampleSize := FSampleTable[FSampleIndex];
+  //WriteLn('Sample Size: ', FSampleSize);
 
   lChunkIndex := FChunkTable.SampleIndexToChunkIndex(1, FSampleIndex, lFirstIndex);
 
@@ -114,6 +126,7 @@ begin
   end;
 
   FChunkTable := TstscAtom(FContainer.Atoms.FindAtom('moov/trak/mdia/minf/stbl/stsc'));
+  FTimeToSample := TsttsAtom(FContainer.Atoms.FindAtom('moov/trak/mdia/minf/stbl/stts'));
 
   lSampleTable := TstszAtom(FContainer.Atoms.FindAtom('moov/trak/mdia/minf/stbl/stsz'));
   SetLength(FSampleTable, lSampleTable.SampleCount);
@@ -223,6 +236,63 @@ begin
 
 
 
+
+end;
+
+procedure TPAM4ADecoderSource.HandleMessage(var AMsg: TPAIOMessage);
+var
+  lSample, lSampleIndex: Int64;
+  lOffset: Integer;
+begin
+  case AMsg.Message of
+    PAM_Seek:
+      if FInited then
+      begin
+        lSample := Trunc((SamplesPerSecond / Channels) * AMsg.Data);
+        lSampleIndex := FTimeToSample.FindSampleIndex(lSample, lOffset);
+        FSampleIndex:=lSampleIndex;
+      end;
+  end;
+end;
+
+function TPAM4ADecoderSource.GetPosition: Double;
+begin
+  if not FInited then
+    Exit(0);
+  Result := FTimeToSample.FindSampleFromIndex(FSampleIndex) / SamplesPerSecond;
+end;
+
+procedure TPAM4ADecoderSource.SetPosition(AValue: Double);
+begin
+  if not FInited then
+    Exit;
+
+  FMsgQueue.PostMessage(PAM_Seek, AValue);
+end;
+
+function TPAM4ADecoderSource.GetMaxPosition: Double;
+begin
+  Result := FTimeToSample.TotalSamples /  SamplesPerSecond;
+  WriteLn('Channels: ', Channels, ' SPS: ', SamplesPerSecond);
+end;
+
+function TPAM4ADecoderSource.CanSeek: Boolean;
+begin
+  Result := True;
+end;
+
+procedure TPAM4ADecoderSource.Play;
+begin
+
+end;
+
+procedure TPAM4ADecoderSource.Pause;
+begin
+
+end;
+
+procedure TPAM4ADecoderSource.Stop;
+begin
 
 end;
 
