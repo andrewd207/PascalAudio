@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CONFIG>
-  <Package Version="4">
+  <Package Version="5">
     <Name Value="PascalAudioSuite"/>
     <Type Value="RunAndDesignTime"/>
     <CompilerOptions>
@@ -8,10 +8,10 @@
       <SearchPaths>
         <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
       </SearchPaths>
-      <Conditionals Value="if SrcOS = 'unix' then
-  CustomOptions+='-dUSEPULSE';"/>
+      <Conditionals Value="if SrcOS = &apos;unix&apos; then
+  CustomOptions+=&apos;-dUSEPULSE&apos;;"/>
     </CompilerOptions>
-    <Files Count="19">
+    <Files Count="20">
       <Item1>
         <Filename Value="pa_base.pas"/>
         <UnitName Value="pa_base"/>
@@ -88,6 +88,10 @@
         <Filename Value="pa_m4a.pas"/>
         <UnitName Value="pa_m4a"/>
       </Item19>
+      <Item20>
+        <Filename Value="pa_ogg_opus.pas"/>
+        <UnitName Value="pa_ogg_opus"/>
+      </Item20>
     </Files>
     <RequiredPkgs Count="3">
       <Item1>

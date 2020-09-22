@@ -42,6 +42,7 @@ uses
   pa_dec_oggvorbis,
   pa_flac,
   pa_wav,
+  pa_m4a,
   pa_register,
   pa_pulse_simple,
   fpg_dialogs;

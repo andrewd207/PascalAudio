@@ -12,7 +12,8 @@ uses
   audacity_noiseremoval, audacity_realfftf, OggHfObject, flac_classes, 
   paio_types, bs2b, paio_channelhelper, paio_utils, noiseremovalmultichannel, 
   paio_messagequeue, paio_faad2, paio_mmdevice, mp4codec, mp4codec_mp4a, 
-  quicktimeatoms, quicktimecontainer, LazarusPackageIntf;
+  quicktimeatoms, quicktimecontainer, paio_opus, paio_ogg_container, 
+  paio_vorbis_comment, paio_ogg_opus, LazarusPackageIntf;
 
 implementation
 
