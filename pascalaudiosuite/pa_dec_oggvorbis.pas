@@ -97,7 +97,7 @@ procedure TPAOggVorbisDecoderSource.DeInitOgg;
 begin
   if not FInited then
     Exit;
-
+  FInited := False;
   FreeAndNil(FOgg);
 end;
 
