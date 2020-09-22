@@ -1,4 +1,4 @@
-= Pascal Audio
+# Pascal Audio
 
 Audio classes to decode and encode various formats including Ogg, Opus, Flac, 
 m4a made for use with the Free Pascal compiler. It's also possible to use other 
@@ -12,14 +12,14 @@ incorporate. As well as the noise removal filter from Audacity.
 
 It is divided into two packages: PascalAudioIO and PascalAudioSuite.
 
-== PascalAudioIO
+## PascalAudioIO
 
 This package contains the bindings and simple classes to directly use the 
 libraries such as libogg or libflac etc. If you don't want to use the 
 "Suite" which has a somewhat complicated threaded mechanism, then you need only
 this.
 
-== PascalAudioSuite
+## PascalAudioSuite
 
 Using "Links" starting with a _Source_ link and ending with a _Destination_ 
 link it's possible to decode and audio file and convert/play it or using any 
@@ -31,7 +31,7 @@ link.
 To apply some effect to the decoded audio just insert some links into the 
 middle of the chain. See the examples folder to see how simple this is.
 
-== Adding new codecs or sources and destinations
+## Adding new codecs or sources and destinations
 
 Adding new codecs is really not that hard and can be done in a few minutes or 
 hours as long as the binding already exists.
