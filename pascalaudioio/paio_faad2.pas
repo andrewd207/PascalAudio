@@ -250,10 +250,13 @@ var
   function FaadLibraryLoaded: Boolean;
 
 implementation
+uses
+  fgl;
 
 var
   libHandle: TLibHandle = 0;
-  libList: TStringList;
+  //libList: TStringList;
+  libList: specialize TFPGMap<String, PPointer>;
 
 procedure LoadFaadLibrary(ALibName: String);
 var
@@ -271,27 +274,27 @@ begin
   if libHandle = 0 then
     Exit;
 
-  libList := TStringList.Create;
+  libList := specialize TFPGMap<String, PPointer>.Create;
 
-  libList.AddObject('NeAACDecGetErrorMessage', TObject(@NeAACDecGetErrorMessage));
-  libList.AddObject('NeAACDecGetCapabilities', TObject(@NeAACDecGetCapabilities));
-  libList.AddObject('NeAACDecOpen', TObject(@NeAACDecOpen));
-  libList.AddObject('NeAACDecGetCurrentConfiguration', TObject(@NeAACDecGetCurrentConfiguration));
-  libList.AddObject('NeAACDecSetConfiguration' , TObject(@NeAACDecSetConfiguration));
-  libList.AddObject('NeAACDecInit', TObject(@NeAACDecInit));
-  libList.AddObject('NeAACDecInit2', TObject(@NeAACDecInit2));
-  libList.AddObject('NeAACDecInitDRM', TObject(@NeAACDecInitDRM));
-  libList.AddObject('NeAACDecPostSeekReset', TObject(@NeAACDecPostSeekReset));
-  libList.AddObject('NeAACDecClose', TObject(@NeAACDecClose));
-  libList.AddObject('NeAACDecDecode', TObject(@NeAACDecDecode));
-  libList.AddObject('NeAACDecDecode2', TObject(@NeAACDecDecode2));
-  libList.AddObject('NeAACDecAudioSpecificConfig', TObject(@NeAACDecAudioSpecificConfig));
+  libList.Add('NeAACDecGetErrorMessage', @NeAACDecGetErrorMessage);
+  libList.Add('NeAACDecGetCapabilities', @NeAACDecGetCapabilities);
+  libList.Add('NeAACDecOpen', @NeAACDecOpen);
+  libList.Add('NeAACDecGetCurrentConfiguration', @NeAACDecGetCurrentConfiguration);
+  libList.Add('NeAACDecSetConfiguration' , @NeAACDecSetConfiguration);
+  libList.Add('NeAACDecInit', @NeAACDecInit);
+  libList.Add('NeAACDecInit2', @NeAACDecInit2);
+  libList.Add('NeAACDecInitDRM', @NeAACDecInitDRM);
+  libList.Add('NeAACDecPostSeekReset', @NeAACDecPostSeekReset);
+  libList.Add('NeAACDecClose', @NeAACDecClose);
+  libList.Add('NeAACDecDecode', @NeAACDecDecode);
+  libList.Add('NeAACDecDecode2', @NeAACDecDecode2);
+  libList.Add('NeAACDecAudioSpecificConfig', @NeAACDecAudioSpecificConfig);
 
   for i := 0 to libList.Count-1 do
   begin
-    lString := libList[i];
+    lString := libList.Keys[i];
     lPointer := GetProcAddress(libHandle, lString);
-    PPointer(libList.Objects[i])^ := lPointer;
+    libList.Data[i]^ := lPointer;
   end;
 
 
@@ -305,7 +308,7 @@ begin
     Exit;
 
   for i := 0 to libList.Count-1 do
-    PPointer(libList.Objects[i])^ := nil;
+    libList.Data[i]^ := nil;
 
   UnloadLibrary(libHandle);
 
