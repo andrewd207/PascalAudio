@@ -42,10 +42,11 @@ type
   TAtomList = class(TList)
   private
     FParent: TAtom;
+    FOwner: TObject;
     function GetAtom(AIndex: Integer): TAtom;
     procedure SetAtom(AIndex: Integer; AValue: TAtom);
   public
-    constructor Create(AParentAtom: TAtom);
+    constructor Create(AParentAtom: TAtom; AOwner: TObject);
     destructor Destroy; override;
     procedure LoadAtoms(AStream: TStream; AFoundEvent: TAtomFoundEvent; AMaxPos: QWord; AClassLookup: TAtomClassLookup = nil);
     // AAtomIndex is the times the Atom is found. Not the Actual Child Index from the parent
@@ -65,6 +66,7 @@ type
     FAtomName: TAtomName;
     FAtoms: TAtomList;
     FClassLookup: TAtomClassLookup;
+    FOwner: TObject;
     function GetAtoms: TAtomList;
     procedure LoadHeader;
     procedure LoadAtoms;
@@ -81,9 +83,10 @@ type
     property AtomSize: QWord read FAtomSize;
     property Atoms: TAtomList read GetAtoms;
     property StreamPosition: Int64 read FAtomPosition;
-    constructor Create(AStream: TStream); virtual;
+    property Owner: TObject read FOwner;
+    constructor Create(AStream: TStream; AOwner: TObject); virtual;
     destructor Destroy; override;
-    class function CreateAtomClass(AStream: TStream): TAtom;
+    class function CreateAtomClass(AStream: TStream; AOwner: TObject): TAtom;
     function DataAsString:String;
     function DataAsDWord: DWord;
   end;
@@ -104,12 +107,21 @@ type
   { TsttsAtom }
 
   TsttsAtom = class(TAtom)
+  public
+    type
+      TEntry = record
+        ConsecutiveSamples: DWord;
+        SampleDuration: DWord;
+      end;
   private
     function GetCount: Integer;
-    function GetItem(AIndex: Integer): Integer;
+    function GetItem(AIndex: Integer): TEntry;
   public
     property Count: Integer read GetCount;
-    property Item[AIndex: Integer]: Integer read GetItem;
+    property Item[AIndex: Integer]: TEntry read GetItem;
+    function FindSampleIndex(ASamplePos: Int64; out AOffset: Integer): Int64;
+    function FindSampleFromIndex(ASampleIndex: Int64): Int64;
+    function TotalSamples: Int64;
   end;
 
   { TstszAtom }
@@ -146,7 +158,7 @@ type
     function GetOffset(AIndex: Integer): DWord;
     function GetStringFromOffset(AIndex: Integer): String;
   public
-    constructor Create(AStream: TStream); override;
+    constructor Create(AStream: TStream; AOwner: TObject); override;
     property Count: DWord read FEntries;
     property Offset[AIndex: Integer]: DWord read GetOffset;
     property StringFromOffset[AIndex: Integer]: String read GetStringFromOffset;
@@ -159,7 +171,7 @@ type
   TmetaAtom = class(TAtom)
     FVersion: Byte;
     FFlags: DWord;
-    constructor Create(AStream: TStream); override;
+    constructor Create(AStream: TStream; AOwner: TObject); override;
   end;
 
   { TstscAtom }
@@ -177,7 +189,7 @@ type
     FEntryCount: DWord;
     FEntries: Array of TChunkEntry;
   public
-   constructor Create(AStream: TStream); override;
+   constructor Create(AStream: TStream; AOwner: TObject);  override;
    function SampleIndexToChunkIndex(ASampleID: DWord; ASampleIndex: DWord; out AFirstIndexInChunk: DWord): DWord;
   published
     property Count: DWord read FEntryCount;
@@ -192,10 +204,12 @@ type
     FEntryCount: DWord;
     function SampleDescAtomClassLookup(Sender: TAtomList; AParent: TAtom; AStream: TStream): TAtomClass;
   public
-    constructor Create(AStream: TStream); override;
+    constructor Create(AStream: TStream; AOwner: TObject);  override;
     property Count: DWord read FEntryCount;
 
   end;
+
+  { TSampleDecriptionAtom }
 
   TSampleDecriptionAtom = class(TAtom)
   private
@@ -204,7 +218,7 @@ type
     function GetDataReferenceIndex: Word;
   public
  // children of stsd atom
-    constructor Create(AStream: TStream); override;
+    constructor Create(AStream: TStream; AOwner: TObject); override;
     property Format:  TAtomName read FAtomName;
     property DataReferenceIndex: Word read GetDataReferenceIndex;
   end;
@@ -230,7 +244,7 @@ type
     function GetSamplesPerPacket: DWord;
     function GetVersion: Word;
   public
-    constructor Create(AStream: TStream); override;
+    constructor Create(AStream: TStream; AOwner: TObject);  override;
     property Version: Word read GetVersion;
     // property RevisionLevel: Word; // is always 0
     // property Vendor: DWord;// is always 0
@@ -285,7 +299,7 @@ type
     property ObjectType: Byte read GetObjectType;
     property ChannelConfig: Byte read GetChannelConfig;
   public
-    constructor Create(AStream: TStream); override;
+    constructor Create(AStream: TStream; AOwner: TObject); override;
   end;
 
 
@@ -294,7 +308,7 @@ type
   TdataAtom = class(TAtom)
     FDataType: DWord;
     FReserved: DWord;
-    constructor Create(AStream: TStream); override;
+    constructor Create(AStream: TStream; AOwner: TObject); override;
   end;
 
   { TchapAtom }
@@ -317,7 +331,7 @@ type
     FDuration: QWord;
     FLanguage: Word;
     FQuality: Word;
-    constructor Create(AStream: TStream); override;
+    constructor Create(AStream: TStream; AOwner: TObject);  override;
   end;
 
   { Ttkhd }
@@ -338,7 +352,7 @@ type
     FMatrixStructure: array[0..2] of array[0..2] of DWord;
     FTrackWidth: DWord;
     FTrackHeight: DWord;
-    constructor Create(AStream: TStream); override;
+    constructor Create(AStream: TStream; AOwner: TObject); override;
   end;
 
 
@@ -368,11 +382,11 @@ type
 
 { TstscAtom }
 
-constructor TstscAtom.Create(AStream: TStream);
+constructor TstscAtom.Create(AStream: TStream; AOwner: TObject);
 var
   i: Integer;
 begin
-  inherited Create(AStream);
+  inherited Create(AStream, AOwner);
   FEntryCount := BEtoN(FStream.ReadDWord);
   SetLength(FEntries, FEntryCount);
   for i := 0 to FEntryCount-1 do
@@ -454,11 +468,11 @@ begin
   Result := FDecoderConfig shr 3 and %1111;
 end;
 
-constructor TesdsAtom.Create(AStream: TStream);
+constructor TesdsAtom.Create(AStream: TStream; AOwner: TObject);
 var
   lLen, lTag: Byte;
 begin
-  inherited Create(AStream);
+  inherited Create(AStream, AOwner);
   StreamSeek(soBeginning, 12);
   lTag:= FStream.ReadByte;
   if lTag = $03 {MP4ESDescrTag} then
@@ -646,9 +660,10 @@ begin
   Result := BEtoN(FStream.ReadWord);
 end;
 
-constructor TSoundSampleDecriptionAtom.Create(AStream: TStream);
+constructor TSoundSampleDecriptionAtom.Create(AStream: TStream; AOwner: TObject
+  );
 begin
-  inherited Create(AStream);
+  inherited Create(AStream, AOwner);
   AtomClassLookup:=@CustomAtomClassLookup;
   case Version of
     0: FDataOffset:=cV1Start;
@@ -671,9 +686,9 @@ begin
   Result := BEtoN(FStream.ReadWord);
 end;
 
-constructor TSampleDecriptionAtom.Create(AStream: TStream);
+constructor TSampleDecriptionAtom.Create(AStream: TStream; AOwner: TObject);
 begin
-  inherited Create(AStream); // reads atom size and atom name.
+  inherited Create(AStream, AOwner); // reads atom size and atom name.
   FDataOffset:=AtomSize-8; // override in children
 end;
 
@@ -729,9 +744,9 @@ begin
   FStream.Read(Result[1], sLength);
 end;
 
-constructor TstcoAtom.Create(AStream: TStream);
+constructor TstcoAtom.Create(AStream: TStream; AOwner: TObject);
 begin
-  inherited Create(AStream);
+  inherited Create(AStream, AOwner);
   StreamSeek(soCurrent);
   FVersion:=FStream.ReadByte;
   FStream.Read(FFlags, 3);
@@ -751,11 +766,11 @@ end;
 
 { Ttkhd }
 
-constructor Ttkhd.Create(AStream: TStream);
+constructor Ttkhd.Create(AStream: TStream; AOwner: TObject);
 var
   i, j: Integer;
 begin
-  inherited Create(AStream);
+  inherited Create(AStream, AOwner);
   StreamSeek(soCurrent);
   FVersion:=FStream.ReadByte;
   FStream.Read(FFlags, 3);
@@ -783,9 +798,9 @@ end;
 
 { TmdhdAtom }
 
-constructor TmdhdAtom.Create(AStream: TStream);
+constructor TmdhdAtom.Create(AStream: TStream; AOwner: TObject);
 begin
-  inherited Create(AStream);
+  inherited Create(AStream, AOwner);
   StreamSeek(soCurrent);
   FVersion:=FStream.ReadByte;
   FStream.Read(FFlags, 3);
@@ -834,10 +849,10 @@ begin
 
 end;
 
-constructor TstsdAtom.Create(AStream: TStream);
+constructor TstsdAtom.Create(AStream: TStream; AOwner: TObject);
 begin
   AtomClassLookup:=@SampleDescAtomClassLookup;
-  inherited Create(AStream);
+  inherited Create(AStream, AOwner);
 
   FStream.Read(FEntryCount, 4);
   FEntryCount := BEtoN(FEntryCount);
@@ -854,9 +869,9 @@ end;
 
 { TdataAtom }
 
-constructor TdataAtom.Create(AStream: TStream);
+constructor TdataAtom.Create(AStream: TStream; AOwner: TObject);
 begin
-  inherited Create(AStream);
+  inherited Create(AStream, AOwner);
   StreamSeek(soCurrent);
   //FStream.Seek(-4, soFromCurrent);
   FDataType:=BEtoN(FStream.ReadDWord);
@@ -866,9 +881,9 @@ end;
 
 { TmetaAtom }
 
-constructor TmetaAtom.Create(AStream: TStream);
+constructor TmetaAtom.Create(AStream: TStream; AOwner: TObject);
 begin
-  inherited Create(AStream);
+  inherited Create(AStream, AOwner);
   StreamSeek(soCurrent);
   //FStream.Seek(-4, soFromCurrent);
   FVersion:=FStream.ReadByte;
@@ -894,22 +909,96 @@ begin
   Result := BEtoN(FStream.ReadDWord);
 end;
 
-function TsttsAtom.GetItem(AIndex: Integer): Integer;
+function TsttsAtom.GetItem(AIndex: Integer): TEntry;
 var
   sttsVersion: Byte;
   c: Integer;
   lIndex: Integer = -1;
 begin
-  Result := 0;
-  StreamSeek(soCurrent);
-  Fstream.Seek(8, soFromCurrent);
+  Result.ConsecutiveSamples := 0;
+  Result.SampleDuration := 0;
   if (AIndex>=Count) or (AIndex<0)then
     Exit;
-  while lIndex < AIndex do
+
+  // Count seeks for us
+  //StreamSeek(soCurrent);
+  //Fstream.Seek(8, soFromCurrent);
+
+  FStream.Seek(AIndex * 8, fsFromCurrent);
+  Result.ConsecutiveSamples:=BEtoN(FStream.ReadDWord);
+  Result.SampleDuration:=BEtoN(FStream.ReadDWord);
+  {while lIndex < AIndex do
   begin
     Inc(lIndex, BEtoN(FStream.ReadDWord));
     Result:=BEtoN(FStream.ReadDWord);
+  end;}
+end;
+
+function TsttsAtom.FindSampleIndex(ASamplePos: Int64; out AOffset: Integer): Int64;
+var
+  lEntryCount, i, lEnd, lStart: Integer;
+  lEntry: TEntry;
+  lDiff: Int64;
+begin
+  Result := 0;
+  lEnd := 0;
+  lEntryCount := Count;
+  for i := 0 to lEntryCount -1 do
+  begin
+    lEntry := Item[i];
+    lStart := lEnd;
+    lEnd := lEnd + (lEntry.ConsecutiveSamples * lEntry.SampleDuration);
+
+    if ASamplePos <= lEnd then
+    begin
+      lDiff := ASamplePos - lStart;
+      Result := Result + (lDiff div lEntry.SampleDuration);
+      AOffset:= lDiff mod lEntry.SampleDuration;
+      Exit;
+    end;
+
+    Result += lEntry.ConsecutiveSamples;
   end;
+end;
+
+function TsttsAtom.FindSampleFromIndex(ASampleIndex: Int64): Int64;
+var
+  lEntryCount, i, lEnd, lStart: Integer;
+  lEntry: TEntry;
+  lDiff: Int64;
+begin
+  Result := 0;
+  lEntryCount := Count;
+  lEnd := 0;
+  for i := 0 to lEntryCount-1 do
+  begin
+    lEntry := Item[i];
+    lStart := lEnd;
+    lEnd := lEnd + lEntry.ConsecutiveSamples;
+    if ASampleIndex <= lEnd then
+    begin
+      lDiff := ASampleIndex - lStart;
+      Result += lEntry.SampleDuration * lDiff;
+      Exit;
+    end;
+
+    Result+= lEntry.ConsecutiveSamples * lEntry.SampleDuration;
+  end;
+
+end;
+
+function TsttsAtom.TotalSamples: Int64;
+var
+  lEntry: TEntry;
+  i: Integer;
+begin
+  Result := 0;
+  for i := 0 to Count-1 do
+  begin
+    lEntry := Item[i];
+    Result += lEntry.ConsecutiveSamples * lEntry.SampleDuration;
+  end;
+  WriteLn('Total Samples: ', Result);
 end;
 
   { TAtomList }
@@ -924,9 +1013,10 @@ begin
   Items[AIndex] := AValue;
 end;
 
-constructor TAtomList.Create(AParentAtom: TAtom);
+constructor TAtomList.Create(AParentAtom: TAtom; AOwner: TObject);
 begin
   Inherited Create;
+  FOwner := AOwner;
   FParent := AParentAtom;
 end;
 
@@ -946,9 +1036,9 @@ begin
   while AStream.Position < AMaxPos -8 do //AStream.Size do
   begin
     if Assigned(AClassLookup) then
-      lAtom := AClassLookup(Self, Parent, AStream).Create(AStream)
+      lAtom := AClassLookup(Self, Parent, AStream).Create(AStream, FOwner)
     else
-      lAtom := TAtomClass.CreateAtomClass(AStream);
+      lAtom := TAtomClass.CreateAtomClass(AStream, FOwner);
     if Assigned(AFoundEvent) then
     begin
       if not AFoundEvent(Self, lAtom) then
@@ -1121,7 +1211,7 @@ begin
     StreamSeek(soCurrent);
     LoadSubitems := TAtom.PeekAtom(FStream, SubAtomName) and IsAtom(SubAtomName);
 
-    FAtoms := TAtomList.Create(Self);
+    FAtoms := TAtomList.Create(Self, FOwner);
     if LoadSubitems or (IsAtom(FAtomName, IsContainer) and IsContainer) then
     begin
       //WriteLn('Gettin child atoms for: ', copy(FAtomName.Chars,0,4));
@@ -1147,9 +1237,10 @@ begin
   AStream.CopyFrom(FStream, DataSize);
 end;
 
-constructor TAtom.Create(AStream: TStream);
+constructor TAtom.Create(AStream: TStream; AOwner: TObject);
 begin
   FStream := AStream;
+  FOwner := AOwner;
   LoadHeader;
 end;
 
@@ -1160,7 +1251,7 @@ begin
   inherited Destroy;
 end;
 
-class function TAtom.CreateAtomClass(AStream: TStream): TAtom;
+class function TAtom.CreateAtomClass(AStream: TStream; AOwner: TObject): TAtom;
 var
   lAtomName: TAtomname;
   NewClass: TAtomClass;
@@ -1177,7 +1268,7 @@ begin
     //WriteLn('unknown atom: ', lAtomName.Chars);
   end;
 
-  Result := NewClass.Create(AStream);
+  Result := NewClass.Create(AStream, AOwner);
 
 end;
 
