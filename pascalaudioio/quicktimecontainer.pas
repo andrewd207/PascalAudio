@@ -100,7 +100,7 @@ begin
   FOwnsStream := AOwnsStream;
   FStream := AStream;
 
-  FAtoms := TAtomList.Create(nil);
+  FAtoms := TAtomList.Create(nil, Self);
   LoadTopLevelAtoms;
 end;
 
