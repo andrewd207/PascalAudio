@@ -1177,6 +1177,10 @@ end;
 
 destructor TFlacStreamDecoder.Destroy;
 begin
+  // release the libFLAC decoder created in Create; delete() also finishes the
+  // stream. Without this the decoder struct and its buffers leak on every file.
+  if Assigned(FDecoder) then
+    FLAC__stream_decoder_delete(FDecoder);
   inherited Destroy;
 end;
 
