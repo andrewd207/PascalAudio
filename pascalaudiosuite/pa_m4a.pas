@@ -43,7 +43,8 @@ type
     FChunkTable: TstscAtom;
     FTimeToSample: TsttsAtom;
     FFrame: TNeAACDecFrameInfo;
-    FBuffer: array[0..1023] of Byte;
+    FBuffer: array of Byte; // grown to hold the largest sample (was a fixed
+                            // 1024-byte array that AAC frames could overrun)
     FSampleSize: Integer;
     FCodec: TMP4Codec;
 
@@ -88,6 +89,12 @@ begin
   FSampleSize := FSampleTable[FSampleIndex];
   //WriteLn('Sample Size: ', FSampleSize);
 
+  // grow the read buffer to fit this sample. AAC frames routinely exceed the
+  // old fixed 1024-byte buffer (FAAD allows ~768 bytes per channel), which
+  // overflowed the stack/heap buffer.
+  if FSampleSize > Length(FBuffer) then
+    SetLength(FBuffer, FSampleSize);
+
   lChunkIndex := FChunkTable.SampleIndexToChunkIndex(1, FSampleIndex, lFirstIndex);
 
 
@@ -114,10 +121,6 @@ procedure TPAM4ADecoderSource.InitAudio;
 var
   lmp4aAtom: TSoundSampleDecriptionAtom;
   lesds: TesdsAtom;
-
-  lBuf: Array[0..254] of Byte;
-  lConfig: Word;
-  lSize: Integer;
   lSampleTable: TstszAtom;
   lSampleOffSet: TstcoAtom;
   lDecoderConfig: PNeAACDecConfiguration;
@@ -149,37 +152,38 @@ begin
 
   lstsdAtom := TstsdAtom(FContainer.Atoms.FindAtom('moov/trak/mdia/minf/stbl/stsd'));
 
-
-  lmp4aAtom := TSoundSampleDecriptionAtom(lstsdAtom.Atoms.Atom[0]);
-  //WriteLn(lmp4aAtom.ClassName);
-  //WriteLn(lmp4aAtom.AtomName.Chars);
-
-  if MP4LookupCodec(lmp4aAtom.AtomName, lCodecClass) then
+  // bail out (rather than dereference nil) if the sample description is missing.
+  if (lstsdAtom = nil) or (lstsdAtom.Atoms.Count = 0) then
   begin
-    FCodec := lCodecClass.Create(lmp4aAtom);
+    DeInitAudio;
+    Exit;
   end;
 
+  lmp4aAtom := TSoundSampleDecriptionAtom(lstsdAtom.Atoms.Atom[0]);
   if lmp4aAtom = nil then
   begin
     DeInitAudio;
     Exit;
   end;
 
+  if MP4LookupCodec(lmp4aAtom.AtomName, lCodecClass) then
+    FCodec := lCodecClass.Create(lmp4aAtom);
+
   lesds := TesdsAtom(lmp4aAtom.Atoms.FindAtom('esds'));
-  lConfig:=lesds.DecoderConfig;
-
-
+  if lesds = nil then
+  begin
+    DeInitAudio;
+    Exit;
+  end;
 
   FDecoder := TAACDecoder.Create;
   lDecoderConfig := FDecoder.Config;
-  //WriteLn(FDecoder.GetErroMessage(FDecoder.LastResult));;
   lDecoderConfig^.outputFormat:=ord(FAAD_FMT_FLOAT);
   FDecoder.Config := lDecoderConfig;
 
-  FDecoder.Init2(@lConfig, 2);
-  WriteLn('Init2: ', FDecoder.LastResult);
-
-  WriteLn('AudioSpcecifiConfig: ',FDecoder.AudioSpecificConfig(@lConfig, 2, @lmp4ASC));
+  // pass the full AudioSpecificConfig (any length) to the decoder.
+  FDecoder.Init2(lesds.DecoderConfigData, lesds.DecoderConfigLength);
+  FDecoder.AudioSpecificConfig(lesds.DecoderConfigData, lesds.DecoderConfigLength, @lmp4ASC);
   Channels:=FDecoder.Channels;
   SamplesPerSecond:=FDecoder.SampleRate;
 
@@ -209,7 +213,6 @@ end;
 function TPAM4ADecoderSource.InternalOutputToDestination: Boolean;
 var
   lRes: Pointer;
-  lSampleBuffer: array[0..2047] of Byte;
   lIsLast: Boolean;
 begin
   if not FInited then
@@ -236,8 +239,6 @@ begin
       //Halt;}
     end;
 
-    if FFrame.error <> 0 then
-      WriteLn('Error: ', FDecoder.GetErroMessage(FFrame.error));
     if (FFrame.samples > 0) then
     begin
       WriteToBuffer(lRes^,FFrame.samples*4, False);
@@ -304,7 +305,6 @@ end;
 function TPAM4ADecoderSource.GetMaxPosition: Double;
 begin
   Result := FTimeToSample.TotalSamples /  SamplesPerSecond;
-  WriteLn('Channels: ', Channels, ' SPS: ', SamplesPerSecond);
 end;
 
 function TPAM4ADecoderSource.CanSeek: Boolean;

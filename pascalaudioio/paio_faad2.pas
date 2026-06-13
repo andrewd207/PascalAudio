@@ -34,7 +34,7 @@ unit paio_faad2;
 { $DEFINE drm}
 
 {$mode objfpc}{$H+}
-{$packrecords 16}
+{$packrecords 8}
 {$optimization noorderfields}
 
 
@@ -46,10 +46,18 @@ uses
 
 const
   FAAD2_VERSION  = '2.7';
-  {$IFNDEF drm}
-  FAAD_LIBNAME= 'libfaad.so';
+  {$IFNDEF MSWINDOWS}
+    {$IFNDEF drm}
+    FAAD_LIBNAME= 'libfaad.so';
+    {$ELSE}
+    FAAD_LIBNAME= 'libfaad_drm.so';
+    {$ENDIF}
   {$ELSE}
-  FAAD_LIBNAME= 'libfaad_drm.so';
+    {$IFNDEF drm}
+    FAAD_LIBNAME= 'libfaad-2.dll';
+    {$ELSE}
+    FAAD_LIBNAME= 'libfaad_drm-2.dll';
+    {$ENDIF}
   {$ENDIF}
 
 type
@@ -131,9 +139,9 @@ type
     //* Audio Specific Info */
     objectTypeIndex: Byte;
     samplingFrequencyIndex: Byte;
-    {$ifdef cpu64}_padding0: array[0..5] of Byte;{$else}_padding0: word{needs testing}{$endif}
+    {$IFDEF UNIX}{$ifdef cpu64}_padding0: array[0..5] of Byte;{$else}_padding0: word{needs testing}{$endif}{$ENDIF}
     samplingFrequency: DWord;
-    {$ifdef cpu64}_padding1: array[0..3] of Byte;{$endif}
+    {$IFDEF UNIX}{$ifdef cpu64}_padding1: array[0..3] of Byte;{$endif}{$ENDIF}
     channelsConfiguration: Byte;
 
     //* GA Specific Info */
@@ -156,9 +164,9 @@ type
   PNeAACDecConfiguration = ^TNeAACDecConfiguration;
   TNeAACDecConfiguration = record
     defObjectType: Byte;
-    {$ifdef cpu64}_padding0: array[0..6] of byte;{$endif}
+    {$IFDEF UNIX}{$ifdef cpu64}_padding0: array[0..6] of byte;{$endif}{$ENDIF}
     defSampleRate: DWord;
-    {$ifdef cpu64}_padding1: array[0..3] of byte;{$endif}
+    {$IFDEF UNIX}{$ifdef cpu64}_padding1: array[0..3] of byte;{$endif}{$ENDIF}
     outputFormat: Byte;
     downMatrix: Byte;
     useOldADTSFormat: ByteBool;
@@ -168,11 +176,13 @@ type
   PNeAACDecFrameInfo = ^TNeAACDecFrameInfo;
   TNeAACDecFrameInfo = record
     bytesconsumed:DWord;
-    {$ifdef cpu64}_padding0: array[0..3] of byte;{$endif}
-    samples: qWord;
+    {$IFDEF UNIX}{$ifdef cpu64}_padding0: array[0..3] of byte;{$endif}{$ENDIF}
+    samples: DWord;
+    {$IFDEF UNIX}{$ifdef cpu64}_padding1: array[0..3] of byte;{$endif}{$ENDIF}
     channels: Byte;
     error: Byte;
-    samplerate: QWord;
+    {$IFDEF UNIX}{$ifdef cpu64}_padding2: array[0..3] of byte;{$endif}{$ENDIF}
+    samplerate: DWord;
 
     //* SBR: 0: off, 1: on; upsample, 2: on; downsampled, 3: off; upsampled */
     sbr: Byte;
@@ -192,7 +202,7 @@ type
 
     //* PS: 0: off, 1: on */
     ps: Byte;
-    //dummy: array[0..3] of Int64; // the lib is overwriting 16 bytes! so set some buffer space
+    dummy: array[0..3] of Int64; // the lib is overwriting 16 bytes! so set some buffer space
   end;
 
   { TAACDecoder }
@@ -206,6 +216,7 @@ type
     function GetConfig: PNeAACDecConfiguration;
     procedure SetConfig(AValue: PNeAACDecConfiguration);
     procedure SetLastResult(AValue: LongInt);
+    procedure PrintConfig(AValue: PNeAACDecConfiguration);
   public
     class function GetErroMessage(AError: Byte): String; static;
     class function AudioSpecificConfig(ABuffer:PByte; ABufferSize: DWord; AMp4ASC: Pmp4AudioSpecificConfig): Byte;
@@ -273,6 +284,7 @@ begin
   libHandle := LoadLibrary(ALibName);
   if libHandle = 0 then
     Exit;
+
 
   libList := specialize TFPGMap<String, PPointer>.Create;
 
@@ -379,8 +391,19 @@ end;
 procedure TAACDecoder.SetLastResult(AValue: LongInt);
 begin
   FLastResult:=AValue;
-  if FLastResult <> 0 then
-    WriteLn('Error: ', GetErroMessage(AValue));
+end;
+
+procedure TAACDecoder.PrintConfig(AValue: PNeAACDecConfiguration);
+begin
+  with AValue^ do
+  begin
+    WriteLn('defObjectType: ',defObjectType);
+    WriteLn('defSampleRate: ', defSampleRate);
+    WriteLn('outputFormat: ', outputFormat);
+    WriteLn('downMatrix: ', downMatrix);
+    WriteLn('useOldADTSFormat: ', useOldADTSFormat);
+    WriteLn('dontUpSampleImplicitSBR: ', dontUpSampleImplicitSBR);
+  end;
 end;
 
 class function TAACDecoder.GetErroMessage(AError: Byte): String;
@@ -401,7 +424,8 @@ end;
 
 destructor TAACDecoder.Destroy;
 begin
-  NeAACDecClose(FHandle);
+  if Assigned(FHandle) then
+    NeAACDecClose(FHandle);
   inherited Destroy;
 end;
 

@@ -14,6 +14,8 @@
 unit quicktimeatoms;
 
 {$mode objfpc}{$H+}
+{$MODESWITCH ADVANCEDRECORDS}
+
 
 interface
 
@@ -22,11 +24,19 @@ uses
 
 type
 
+  TAtomNameUInt32 = DWord;
+
   TAtomName = record
     case integer of
      0: (Int: Cardinal);
      1: (Bytes: array[0..3] of byte);
      2: (Chars: array[0..3] of char);
+  end;
+
+  { TAtomNameHelper }
+
+  TAtomNameHelper = record helper for TAtomName
+    function Equals(AValue: String): Boolean;
   end;
 
   TAtom = class;
@@ -89,6 +99,7 @@ type
     class function CreateAtomClass(AStream: TStream; AOwner: TObject): TAtom;
     function DataAsString:String;
     function DataAsDWord: DWord;
+    function PropstoString: String; virtual;
   end;
 
   TftypAtom = class(TAtom)
@@ -97,10 +108,11 @@ type
     function GetAltBrandCount: Integer;
     function GetMajorBrand: String;
     function GetVersion: LongWord;
-  public
+  published
    property MajorBrand: String read GetMajorBrand;
    property Version: LongWord read GetVersion;
    property AltBrandCount: Integer read GetAltBrandCount;
+  public
    property AltBrand[AIndex: Integer]: String read GetAltBrand;
   end;
 
@@ -117,11 +129,14 @@ type
     function GetCount: Integer;
     function GetItem(AIndex: Integer): TEntry;
   public
-    property Count: Integer read GetCount;
     property Item[AIndex: Integer]: TEntry read GetItem;
     function FindSampleIndex(ASamplePos: Int64; out AOffset: Integer): Int64;
     function FindSampleFromIndex(ASampleIndex: Int64): Int64;
     function TotalSamples: Int64;
+  published
+    property Count: Integer read GetCount;
+    property TotalSampleCount: Int64 read TotalSamples;
+
   end;
 
   { TstszAtom }
@@ -139,11 +154,12 @@ type
   function GetSampleSizeEntry(AIndex: LongWord): LongWord;
   function GetSampleSize: LongWord;
   function GetVersion: Byte;
-  public
+  published
     property Version: Byte read GetVersion;
     property Flags: LongWord read GetFlags;
     property SampleSize: LongWord read GetSampleSize;
     property SampleCount: LongWord read GetSampleCount;
+  public
     property SampleSizeEntry[AIndex: LongWord]: LongWord read GetSampleSizeEntry;
     procedure CopySampleTable(ABuffer: PDword);
   end;
@@ -159,7 +175,9 @@ type
     function GetStringFromOffset(AIndex: Integer): String;
   public
     constructor Create(AStream: TStream; AOwner: TObject); override;
+  published
     property Count: DWord read FEntries;
+  public
     property Offset[AIndex: Integer]: DWord read GetOffset;
     property StringFromOffset[AIndex: Integer]: String read GetStringFromOffset;
     procedure CopyTable(ABuffer: PDWord);
@@ -172,6 +190,9 @@ type
     FVersion: Byte;
     FFlags: DWord;
     constructor Create(AStream: TStream; AOwner: TObject); override;
+  published
+    property Version: Byte read FVersion;
+    property Flags: DWord read FFlags;
   end;
 
   { TstscAtom }
@@ -205,8 +226,8 @@ type
     function SampleDescAtomClassLookup(Sender: TAtomList; AParent: TAtom; AStream: TStream): TAtomClass;
   public
     constructor Create(AStream: TStream; AOwner: TObject);  override;
+  published
     property Count: DWord read FEntryCount;
-
   end;
 
   { TSampleDecriptionAtom }
@@ -216,10 +237,13 @@ type
   const
     cBaseSampleSizePos = 14;
     function GetDataReferenceIndex: Word;
+    function GetFormat32: TAtomNameUInt32;
   public
  // children of stsd atom
     constructor Create(AStream: TStream; AOwner: TObject); override;
     property Format:  TAtomName read FAtomName;
+ published
+    property Format32:  TAtomNameUInt32 read GetFormat32;
     property DataReferenceIndex: Word read GetDataReferenceIndex;
   end;
 
@@ -245,6 +269,7 @@ type
     function GetVersion: Word;
   public
     constructor Create(AStream: TStream; AOwner: TObject);  override;
+  published
     property Version: Word read GetVersion;
     // property RevisionLevel: Word; // is always 0
     // property Vendor: DWord;// is always 0
@@ -262,9 +287,25 @@ type
     // we don't support v3 yet.
   end;
 
-  //TSoundSampleAAVDDecriptionAtom = class(TSoundSampleDecriptionAtom)
+  { TSoundSampleAAVDDecriptionAtom }
 
-  //end;
+  TSoundSampleAAVDDecriptionAtom = class(TAtom)
+  private
+  const
+    vChannelsOffset = 24; // word
+    vBitsPerChannelOffset = 26; // word
+    vSamplerate = 30; // dword
+  private
+    function GetBitsPerChannel: Word;
+    function GetChannels: Word;
+    function GetSampleRate: DWord;
+  published
+    property Channels: Word read GetChannels;
+    property BitsPerChannel: Word read GetBitsPerChannel;
+    property SampleRate: DWord read GetSampleRate;
+  public
+    constructor Create(AStream: TStream; AOwner: TObject);  override;
+  end;
 
   { TesdsAtom }
 
@@ -273,6 +314,7 @@ type
     FAvgBitrate: DWord;
     FBuffersizeDB: DWord;
     FDecoderConfig: Word;
+    FDecoderConfigBytes: array of Byte; // full decoder-specific info (ASC), file order
     FDecoderConfigLength: Byte;
     FESId: Word;
     FMaxBitrate: DWord;
@@ -300,6 +342,10 @@ type
     property ChannelConfig: Byte read GetChannelConfig;
   public
     constructor Create(AStream: TStream; AOwner: TObject); override;
+    // raw decoder-specific info (AudioSpecificConfig) bytes, in file order, of
+    // length DecoderConfigLength. nil when empty. Use this for the AAC decoder
+    // init rather than the legacy 2-byte DecoderConfig word.
+    function DecoderConfigData: PByte;
   end;
 
 
@@ -309,6 +355,9 @@ type
     FDataType: DWord;
     FReserved: DWord;
     constructor Create(AStream: TStream; AOwner: TObject); override;
+  published
+    property DataType: DWord read FDataType;
+    property Reserved: DWord read FReserved;
   end;
 
   { TchapAtom }
@@ -332,6 +381,15 @@ type
     FLanguage: Word;
     FQuality: Word;
     constructor Create(AStream: TStream; AOwner: TObject);  override;
+  published
+    property Version: Byte read FVersion;
+    property Flags: DWord read FFlags;
+    property CreationTime: QWord read FCreationTime;
+    property ModificationTime: QWord read FModificationTime;
+    property TimeScale: DWord read FTimeScale;
+    property Duration: QWord read FDuration;
+    property Language: Word read FLanguage;
+    property Quality: Word read FQuality;
   end;
 
   { Ttkhd }
@@ -353,6 +411,21 @@ type
     FTrackWidth: DWord;
     FTrackHeight: DWord;
     constructor Create(AStream: TStream; AOwner: TObject); override;
+  published
+    property Version: Byte read FVersion;
+    property Flags: DWord read FFlags;
+    property CreationTime: DWord read FCreationTime;
+    property ModificationTime: DWord read FModificationTime;
+    property TrackId: DWord read FTrackID;
+    property Reserved: DWord read FReserved;
+    property Duration: DWord read FDuration;
+    property Reserved2: DWord read FReserved2;
+    property Layer: Word read FLayer;
+    property AlternativeGroup: Word read FAlternativeGroup;
+    property Volume: Word read FVolume;
+    property Reserved3: Word read FReserved3;
+    property TrackWidth: DWord read FTrackWidth;
+    property TrackHeight: DWord read FTrackHeight;
   end;
 
 
@@ -373,12 +446,41 @@ operator > (A,B: TAtomName): Boolean;
 
 implementation
 
+uses
+  TypInfo;
+
 type
   TAtomNameRecord = record
     N: TAtomName;  // Name
     B: Boolean;    // IsConainer
     C: TAtomClass;
   end;
+
+{ TSoundSampleAAVDDecriptionAtom }
+
+function TSoundSampleAAVDDecriptionAtom.GetBitsPerChannel: Word;
+begin
+  StreamSeek(soBeginning, vBitsPerChannelOffset);
+  Result := BEtoN(FStream.ReadWord);
+end;
+
+function TSoundSampleAAVDDecriptionAtom.GetChannels: Word;
+begin
+  StreamSeek(soBeginning, vChannelsOffset);
+  Result := BEtoN(FStream.ReadWord);
+end;
+
+function TSoundSampleAAVDDecriptionAtom.GetSampleRate: DWord;
+begin
+  StreamSeek(soBeginning, vSamplerate);
+  Result := BEtoN(FStream.ReadDWord);
+end;
+
+constructor TSoundSampleAAVDDecriptionAtom.Create(AStream: TStream;
+  AOwner: TObject);
+begin
+  inherited Create(AStream, AOwner);
+end;
 
 { TstscAtom }
 
@@ -436,15 +538,21 @@ begin
       Inc(lCountedSamples, FEntries[i].SamplesPerChunk);
       lLastChunk:=FEntries[i].FirstChunk;
     end;
-    // exited loop without result so keep counting last entry as it must repeat
+    // No entry matched: the last stsc entry repeats for every remaining chunk.
+    // After a for-loop completes normally the counter is undefined in FPC, so
+    // pin it to the last valid entry. Advance the chunk index by one per chunk
+    // (not by a sample count), and use the same '>' test as the loop above.
+    if FEntryCount = 0 then
+      Exit;
+    i := FEntryCount - 1;
     repeat
-      if lCountedSamples + FEntries[i].SamplesPerChunk >= ASampleIndex then
+      if lCountedSamples + FEntries[i].SamplesPerChunk > ASampleIndex then
       begin
         AFirstIndexInChunk:= lCountedSamples;
         Exit;
       end;
 
-      Inc(Result, FEntries[i].SamplesPerChunk);
+      Inc(Result);
       Inc(lCountedSamples, FEntries[i].SamplesPerChunk);
 
     until False;
@@ -500,9 +608,19 @@ begin
         repeat
           lLen := FStream.ReadByte;
         until lLen <> $80;
-        if lLen <> 2 then raise Exception.Create('MP4DecSpecificDescrTag length > 1 we can''t handle that yet!');
         FDecoderConfigLength:=lLen;
-        FDecoderConfig:={BEtoN}(FStream.ReadWord);
+        // read the full AudioSpecificConfig (was hard-limited to 2 bytes, which
+        // rejected HE-AAC/explicit-SBR configs). Keep the first two bytes in the
+        // legacy FDecoderConfig word so the bit accessors below are unchanged
+        // (ReadWord on LE produced byte0 or byte1 shl 8 == this layout).
+        SetLength(FDecoderConfigBytes, lLen);
+        if lLen > 0 then
+          FStream.Read(FDecoderConfigBytes[0], lLen);
+        FDecoderConfig := 0;
+        if lLen >= 2 then
+          FDecoderConfig := FDecoderConfigBytes[0] or (FDecoderConfigBytes[1] shl 8)
+        else if lLen = 1 then
+          FDecoderConfig := FDecoderConfigBytes[0];
         //WriteLn(BinStr(FDecoderConfig, 16));
 
         lTag := FStream.ReadByte;
@@ -517,6 +635,13 @@ begin
       end;
     end;
   end;
+end;
+
+function TesdsAtom.DecoderConfigData: PByte;
+begin
+  if Length(FDecoderConfigBytes) = 0 then
+    Exit(nil);
+  Result := @FDecoderConfigBytes[0];
 end;
 
 { TstszAtom }
@@ -684,6 +809,11 @@ function TSampleDecriptionAtom.GetDataReferenceIndex: Word;
 begin
   StreamSeek(soBeginning, cBaseSampleSizePos);
   Result := BEtoN(FStream.ReadWord);
+end;
+
+function TSampleDecriptionAtom.GetFormat32: TAtomNameUInt32;
+begin
+  Result := Format.Int;
 end;
 
 constructor TSampleDecriptionAtom.Create(AStream: TStream; AOwner: TObject);
@@ -1133,6 +1263,17 @@ begin
 
 end;
 
+{ TAtomNameHelper }
+
+function TAtomNameHelper.Equals(AValue: String): Boolean;
+begin
+  Result := False;
+  if Length(AValue)<> 4 then
+      Exit;
+
+  Result := CompareMem(PChar(AValue), @Chars[0], 4);
+end;
+
 { TAtom }
 
 procedure TAtom.LoadHeader;
@@ -1284,6 +1425,38 @@ begin
   StreamSeek(soCurrent);
   FStream.Read(Result, 4);
   Result := BEToN(Result);
+end;
+
+function TAtom.PropstoString: String;
+var
+  lTypeData: PTypeData;
+  lProplist: PPropList;
+  lPropInfo, lProp: PPropInfo;
+  lCount, i: Integer;
+  lLine: String;
+begin
+  Result := AtomName.Chars +'('+AtomSize.ToString+')'+LineEnding;
+  lTypeData := GetTypeData(ClassInfo);
+  GetMem(lProplist, lTypeData^.PropCount);
+  try
+    lCount := GetPropList(ClassInfo, lProplist);
+
+    for i := 0 to lCount-1 do
+    begin
+      lProp := lProplist^[i];
+      lLine:=lProp^.Name + ': ';
+      case lProp^.PropType^.Kind of
+        tkInteger, tkInt64, tkQWord: lLine:=lLine+ GetOrdProp(Self, lProp).ToString + LineEnding;
+        tkAString: lLine:=lLine+ GetStrProp(Self, lProp)+ LineEnding;
+      else
+        lLine:=lLine+GetEnumName(TypeInfo(TTypeKind), Integer(TypInfo.PropType(Self, lProplist^[i]^.Name) ))+  LineEnding;
+      end;
+      Result := REsult + lLine;
+    end;
+
+  finally
+    Freemem(lProplist);
+  end;
 end;
 
 var
