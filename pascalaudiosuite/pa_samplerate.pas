@@ -66,6 +66,12 @@ var
 begin
   //WriteLn('Init data');
   FInited:=True;
+  // libsamplerate resamples but never remaps channels: input and output must
+  // have the same channel count. Adopt the source's channel count so the
+  // converter, the frame math below, and the channel count we report
+  // downstream all agree (otherwise frame counts are miscomputed and
+  // src_process reports "arrays overlap").
+  FOutChannels := (DataSource.GetSourceObject as IPAAudioInformation).Channels;
   FSrc:= src_new(SRC_SINC_FASTEST, FOutChannels, @error);
   if error <> 0 then
     WriteLn('ProcessResult: ',src_strerror(error));
@@ -109,70 +115,45 @@ end;
 function TPASampleRateLink.InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64;
 var
   sdata: SRC_DATA;
-  Converted: Pointer;
-  ConvertedToFloat: pcfloat absolute Converted;
-  ConvertedToShort: pcshort absolute Converted;
   OutData: pointer;
   OutDataSize: Integer;
-  Ratio: Single;
+  InFrames: Integer;
+  OutFrames: Integer;
   SourceSamplesPS: Integer;
-  SourceFormat: TPAAudioFormat;
-  SourceChannels: Integer;
   res: cint;
 begin
   //WriteLn('samplerate process');
   if not FInited then
     InitData;
 
-  with (DataSource.GetSourceObject as IPAAudioInformation) do
-  begin
-    SourceSamplesPS:=SamplesPerSecond;
-    SourceFormat:=Format;
-    SourceChannels:=Channels;
-  end;
+  SourceSamplesPS := (DataSource.GetSourceObject as IPAAudioInformation).SamplesPerSecond;
 
   sdata.src_ratio:=SamplesPerSecond / SourceSamplesPS;
 
-  //Converted := Getmem(Max(ACount, Trunc(ACount * 4{sdata.src_ratio})+1)+4);
+  // Input is float32 (the base converts to Format=afFloat32 before calling us).
+  InFrames := ACount div BytesPerSample(afFloat32) div FOutChannels;
 
-  // alloc enough memory for before and after frames. whichever is greater
-  OutDataSize := Max(ACount, Trunc(ACount * sdata.src_ratio))+100;
-  OutDataSize := ACount * 4 + 4;
-  //WriteLn('DataSize : ', OutDataSize, ' : ', ACount * 4 + 4);
+  // Output buffer must hold input_frames * ratio frames; round up and add a
+  // little slack for the converter's edge handling. Size the allocation in
+  // floats (4 bytes), and tell libsamplerate the true frame capacity -- the
+  // old code sized output_frames as bytes/2 (a 16-bit-sample assumption),
+  // claiming twice the real capacity and overflowing the heap buffer.
+  OutFrames := Trunc(InFrames * sdata.src_ratio) + 16;
+  OutDataSize := OutFrames * FOutChannels * SizeOf(cfloat);
   OutData := GetMem(OutDataSize);
 
-  //src_short_to_float_array(pcshort(@AData), ConvertedToFloat, ACount div BytesPerSample(Format));
-  //ConvertShortIntsToFloat(PShortInt(@AData), ConvertedToFloat, ACount div BytesPerSample);
-
-//  sdata.data_in:=ConvertedToFloat;
   sdata.data_in:=@AData;
   sdata.data_out:=pcfloat(OutData);
-  sdata.input_frames:=ACount div BytesPerSample(Format) div SourceChannels;
-
-  //sdata.input_frames:=(ACount div ((SourceSamplesPS div SourceBytesPerSample) div SourceChannels));
-  //sdata.output_frames:= OutDataSize div 2 div SourceChannels;
-  sdata.output_frames:= OutDataSize div 2 div SourceChannels;
+  sdata.input_frames:=InFrames;
+  sdata.output_frames:=OutFrames;
   sdata.end_of_input:=0;//ord(FDataIsEnded and FBufferManager.Empty);
-
-{  WriteLn('input frames avail: ', sdata.input_frames);
-
-  WriteLn('Processing Data:', ACount);}
 
   res:=src_process(FSrc, @sdata);
   if Res <> 0 then
     WriteLn('ProcessResult: ',src_strerror(res));
- {
-  WriteLn('input frames avail: ', sdata.input_frames);
-  WriteLn('input frames used: ', sdata.input_frames_used);
-  WriteLn('output frames generated: ', sdata.output_frames_gen);
-  }
 
-  //src_float_to_short_array(sdata.data_out, ConvertedToShort, sdata.output_frames_gen * FOutChannels);
-  //WriteToBuffer(ConvertedToShort^, sdata.output_frames_gen * FOutChannels * FOutBytesPerSample, AIsLastData);
+  WriteToBuffer(sdata.data_out^, sdata.output_frames_gen * FOutChannels * SizeOf(cfloat), AIsLastData);
 
-  WriteToBuffer(sdata.data_out^, sdata.output_frames_gen * FOutChannels * BytesPerSample(afFloat32), AIsLastData);
-
-  //Freemem(Converted);
   FreeMem(OutData);
 
 end;
@@ -192,6 +173,12 @@ end;
 
 destructor TPASampleRateLink.Destroy;
 begin
+  // stop the worker thread (it uses FSrc in InternalProcessData) before freeing
+  // the libsamplerate state; FinishConvert (src_delete) was otherwise never
+  // called, leaking the converter and its internal buffers.
+  DestroyWaitSync;
+  if FInited then
+    FinishConvert;
   inherited Destroy;
 end;
 

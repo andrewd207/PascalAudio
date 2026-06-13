@@ -1331,6 +1331,11 @@ begin
   begin
     FDestBuf^.IsEndOfData:=True;
     WriteToDestinations(FDestBuf);
+    // Null it so the trailing flush in SignalDestinationsDone doesn't send the
+    // very same buffer a second time (which gets returned to the pool twice ->
+    // "Buffer already in pool!"). This bit the rate-changing links, whose final
+    // output is a partial buffer that takes this path.
+    FDestBuf := nil;
   end;
 end;
 
