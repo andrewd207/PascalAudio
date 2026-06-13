@@ -563,60 +563,31 @@ begin
 end;
 
 function TPABufferPool.GetBufferFromPool(AWait: Boolean = True): PAudioBuffer;
-var
-  WaitEvent: TPABufferEvent;
-  Res: TWaitResult;
 begin
-  // Check the free list and register a waiter as one atomic step, so a
-  // concurrent ReturnBufferToPool can't slip a buffer past us into the list
-  // (it would hand it to our registered waiter instead).
   EnterCriticalsection(FCrit);
   try
     Result := PAudioBuffer(FBufferList.GetItem); // can return nil
     if Assigned(Result) or not AWait then
       Exit;
-    WaitEvent := TPABufferEvent.Create;
-    WaitEvent.ResetEvent;
-    FWaitList.AddObject(WaitEvent);
+
+    // The free list is empty. A fixed pool deadlocks any rate-changing link
+    // (resampler/samplerate): such a link holds a partially filled output
+    // buffer across InternalProcessData calls while the source keeps filling
+    // its input queue, so every pool buffer ends up in flight and none is ever
+    // returned. The source then blocks writing to the full input queue, the
+    // link blocks here waiting for an output buffer, and the destination
+    // starves -- a permanent three-way deadlock.
+    //
+    // Grow the pool on demand instead of blocking. FBuffers owns the buffer for
+    // cleanup at shutdown; once the chain drains it it returns to the free list
+    // via ReturnBufferToPool and is recycled. Per-stage backpressure still
+    // bounds memory via each TPAAudioBufferManager's queue limit.
+    Result := GetMem(SizeOf(TAudioBuffer));
+    FillChar(Result^, SizeOf(TAudioBuffer), 0);
+    FBuffers.Add(Result);
   finally
     LeaveCriticalsection(FCrit);
   end;
-
-  repeat
-    Res := WaitEvent.WaitFor(1000);
-    if Res = wrSignaled then
-    begin
-      // CheckWaitFor dequeued our event from FWaitList and gave us a buffer.
-      Result := WaitEvent.Buffer;
-      FreeAndNil(WaitEvent);
-      Break;
-    end;
-
-    // Timed out (or abandoned). Decide atomically vs. ReturnBufferToPool whether
-    // we were just handed a buffer, otherwise try to self-service from the list.
-    EnterCriticalsection(FCrit);
-    try
-      if WaitEvent.IsSet then
-      begin
-        Result := WaitEvent.Buffer;
-        FreeAndNil(WaitEvent);
-      end
-      else
-      begin
-        Result := PAudioBuffer(FBufferList.GetItem);
-        if Assigned(Result) then
-        begin
-          // We grabbed our own buffer. Leave the event in FWaitList but flag it
-          // so a returner disposes it instead of handing it a buffer (which
-          // would orphan that buffer).
-          WaitEvent.Buffer := nil;
-          WaitEvent.OwnerDestroyed := True;
-        end;
-      end;
-    finally
-      LeaveCriticalsection(FCrit);
-    end;
-  until Assigned(Result);
 end;
 
 procedure TPABufferPool.ReturnBufferToPool(ABuffer: PAudioBuffer);
