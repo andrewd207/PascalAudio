@@ -49,6 +49,7 @@ type
     procedure FinishStream;
   protected
     function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; override;
+    procedure BeforeStreamFree; override;
   public
     constructor Create(AStream: TStream; AOwnsStream: Boolean); override;
     property    Stream;
@@ -107,8 +108,11 @@ begin
 
   WavChunk.BitsPerSample := 16;
   WavChunk.Channels:=Channels;
-  WavChunk.SampleRate:= SamplesPerSecond div Channels;
-  WavChunk.ByteRate:=(WavChunk.BitsPerSample * Channels) div 8;
+  // SamplesPerSecond is the true frame rate (PulseAudio uses it directly as the
+  // sample rate). BlockAlign = bytes per frame; ByteRate = bytes per second.
+  WavChunk.SampleRate:= SamplesPerSecond;
+  WavChunk.BlockAlign:= (WavChunk.BitsPerSample * Channels) div 8;
+  WavChunk.ByteRate:= WavChunk.SampleRate * WavChunk.BlockAlign;
   NtoLE(WavChunk);
 
   DataChunk.ID := AUDIO_CHUNK_ID_data;
@@ -149,6 +153,14 @@ begin
   begin
     FinishStream;
   end;
+end;
+
+procedure TPAWavDest.BeforeStreamFree;
+begin
+  // ensure the RIFF/data sizes get patched even if the final buffer never
+  // carried the last-data flag (e.g. data ended on a buffer boundary).
+  if FInited then
+    FinishStream;
 end;
 
 constructor TPAWavDest.Create(AStream: TStream; AOwnsStream: Boolean);

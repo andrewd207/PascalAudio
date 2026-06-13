@@ -26,7 +26,7 @@ type
     procedure SetStream(AValue: TStream); override;
     function  InternalOutputToDestination: Boolean; override;
     procedure SignalDestinationsDone; override;
-    procedure HandleMessage(var AMsg: TPAIOMessage); override;
+    function HandleMessage(var AMsg: TPAIOMessage): Boolean; override;
     // IPAPlayable
     function  CanSeek: Boolean;
     function  GetPosition: Double;
@@ -35,6 +35,7 @@ type
     function  GetSamplesPerSecond: Integer; override;
   public
     constructor Create(AStream: TStream; AOwnsStream: Boolean); override;
+    destructor Destroy; override;
     procedure InitValues;
     //IPAPlayable
     procedure Play;
@@ -121,10 +122,11 @@ begin
   inherited SignalDestinationsDone;
 end;
 
-procedure TPAOggOpusDecoderSource.HandleMessage(var AMsg: TPAIOMessage);
+function TPAOggOpusDecoderSource.HandleMessage(var AMsg: TPAIOMessage): Boolean;
 var
   lPosition: QWord;
 begin
+  Result := True;
   case AMsg.Message of
     PAM_Seek:
       begin
@@ -135,6 +137,8 @@ begin
           FOpus.SamplePosition:=lPosition;
         end;
       end;
+  else
+    Result := False;
   end;
 end;
 
@@ -177,6 +181,15 @@ constructor TPAOggOpusDecoderSource.Create(AStream: TStream;
 begin
   inherited Create(AStream, AOwnsStream);
   Format := afFloat32
+end;
+
+destructor TPAOggOpusDecoderSource.Destroy;
+begin
+  // stop the worker thread (which uses FOpus in InternalOutputToDestination)
+  // before freeing FOpus, then let the ancestor free the stream.
+  DestroyWaitSync;
+  DeInitOpus;
+  inherited Destroy;
 end;
 
 procedure TPAOggOpusDecoderSource.InitValues;

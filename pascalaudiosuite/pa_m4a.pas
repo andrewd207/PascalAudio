@@ -46,13 +46,14 @@ type
     FBuffer: array[0..1023] of Byte;
     FSampleSize: Integer;
     FCodec: TMP4Codec;
-    function ReadNextSample: Boolean;
+
+    function ReadNextSample(out AIsLast: Boolean): Boolean;
     procedure InitAudio;
     procedure DeInitAudio;
   protected
     procedure SetStream(AValue: TStream); override;
     function InternalOutputToDestination: Boolean; override;
-    procedure HandleMessage(var AMsg: TPAIOMessage); override;
+    function HandleMessage(var AMsg: TPAIOMessage): Boolean; override;
     function  GetPosition: Double;
     procedure SetPosition(AValue: Double);
     function  GetMaxPosition: Double;
@@ -64,19 +65,23 @@ type
     property  Position: Double read GetPosition write SetPosition;
     property  MaxPosition: Double read GetMaxPosition;
     constructor Create(AStream: TStream; AOwnsStream: Boolean=True); override;
+    destructor Destroy; override;
   end;
 
 implementation
+uses MD5;
 
 { TPAM4ADecoderSource }
 
-function TPAM4ADecoderSource.ReadNextSample: Boolean;
+function TPAM4ADecoderSource.ReadNextSample(out AIsLast: Boolean): Boolean;
 var
   i: Integer;
   lFirstIndex, lChunkIndex: DWord;
   lSamplesOffset: DWord = 0;
+  lCount: LongInt;
 begin
   Result := FSampleIndex < Length(FSampleTable);
+  AIsLast:=FSampleIndex+1 >= Length(FSampleTable);
   if not Result then
     Exit;
   //WriteLn('Sample index: ', FSampleIndex);
@@ -85,14 +90,19 @@ begin
 
   lChunkIndex := FChunkTable.SampleIndexToChunkIndex(1, FSampleIndex, lFirstIndex);
 
+
   for i := lFirstIndex to FSampleIndex-1 do
     Inc(lSamplesOffset, FSampleTable[i]);
 
   FContainer.Stream.Position:=FChunkOffset[lChunkIndex] + lSamplesOffset;
-  FContainer.Stream.Read(FBuffer[0], FSampleSize);
+  lCount := FContainer.Stream.Read(FBuffer[0], FSampleSize);
+  //WriteLN('read = ', lCount);
 
   if Assigned(FCodec) then
+  begin
     FCodec.Filter(@FBuffer[0], FSampleSize);
+    //WriteLn('codec filtered' );
+  end;
   Inc(FSampleIndex);
   {Write(Pred(FSampleIndex), ': ');
   for i := 0 to 7 do
@@ -167,10 +177,9 @@ begin
   FDecoder.Config := lDecoderConfig;
 
   FDecoder.Init2(@lConfig, 2);
+  WriteLn('Init2: ', FDecoder.LastResult);
 
-  FDecoder.AudioSpecificConfig(@lConfig, 2, @lmp4ASC);
-
-  //WriteLn(FDecoder.Channels);
+  WriteLn('AudioSpcecifiConfig: ',FDecoder.AudioSpecificConfig(@lConfig, 2, @lmp4ASC));
   Channels:=FDecoder.Channels;
   SamplesPerSecond:=FDecoder.SampleRate;
 
@@ -181,11 +190,9 @@ begin
   if not FInited then
     Exit;
   FInited:=False;
-  if Assigned(FContainer) then
-  begin
-    Freeandnil(FContainer);
-    FreeAndNil(FDecoder);
-  end;
+  FreeAndNil(FCodec);
+  FreeAndNil(FDecoder);
+  FreeAndNil(FContainer);
 end;
 
 procedure TPAM4ADecoderSource.SetStream(AValue: TStream);
@@ -203,19 +210,34 @@ function TPAM4ADecoderSource.InternalOutputToDestination: Boolean;
 var
   lRes: Pointer;
   lSampleBuffer: array[0..2047] of Byte;
+  lIsLast: Boolean;
 begin
   if not FInited then
     InitAudio;
 
-
-  Result := ReadNextSample;
+  Result := ReadNextSample(lIsLast);
 
   if Result then
   begin
+
+    //WriteLN(MD5Print(MD5Buffer(FBuffer[0], FSampleSize)));
     lRes := FDecoder.Decode(@FFrame, @FBuffer[0], FSampleSize);
+    with FFrame do
+    begin
+      {WriteLn('bytesconsumed: ',bytesconsumed);
+      WriteLn('samples: ', samples);
+      WriteLn('channels: ', channels);
+      WriteLn('error: ',error);
+      writeln('samplerate: ', samplerate);
+      //* SBR: 0: off, 1: on; upsample, 2: on; downsampled, 3: off; upsampled */
+      WriteLn('sbr: ', sbr);
+      //* MPEG-4 ObjectType */
+      WriteLn('object_type: ',object_type);
+      //Halt;}
+    end;
+
     if FFrame.error <> 0 then
       WriteLn('Error: ', FDecoder.GetErroMessage(FFrame.error));
-
     if (FFrame.samples > 0) then
     begin
       WriteToBuffer(lRes^,FFrame.samples*4, False);
@@ -229,8 +251,14 @@ begin
 
      writeln;
     end;     }
-  end;
+  end
+  else
+    REsult := False; // for debugging stop point
 
+  if not Result then
+    SignalDestinationsDone;
+  {if lIsLast then
+    Result := False;}
   //sleep(1000);
 
 
@@ -239,19 +267,22 @@ begin
 
 end;
 
-procedure TPAM4ADecoderSource.HandleMessage(var AMsg: TPAIOMessage);
+function TPAM4ADecoderSource.HandleMessage(var AMsg: TPAIOMessage): Boolean;
 var
   lSample, lSampleIndex: Int64;
   lOffset: Integer;
 begin
+  Result := True;
   case AMsg.Message of
     PAM_Seek:
       if FInited then
       begin
-        lSample := Trunc((SamplesPerSecond / Channels) * AMsg.Data);
+        lSample := Trunc(Double((SamplesPerSecond / Channels) * AMsg.Data));
         lSampleIndex := FTimeToSample.FindSampleIndex(lSample, lOffset);
         FSampleIndex:=lSampleIndex;
       end;
+  else
+    Result := False;
   end;
 end;
 
@@ -300,6 +331,15 @@ constructor TPAM4ADecoderSource.Create(AStream: TStream; AOwnsStream: Boolean);
 begin
   inherited Create(AStream, AOwnsStream);
   Format:=afFloat32;
+end;
+
+destructor TPAM4ADecoderSource.Destroy;
+begin
+  // stop the worker thread (which uses FContainer/FDecoder in
+  // InternalOutputToDestination) before freeing them, then free the stream.
+  DestroyWaitSync;
+  DeInitAudio;
+  inherited Destroy;
 end;
 
 initialization

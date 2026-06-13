@@ -434,6 +434,8 @@ end;
 destructor TOggOpusDecoder.Destroy;
 begin
   FComments.Free;
+  FDecoder.Free; // releases the libopus decoder (InitDecoder created it)
+  SetLength(FPage.SegmentSize, 0);
   inherited Destroy;
 end;
 

@@ -21,10 +21,13 @@ uses
   Classes, SysUtils, pa_base, flac_classes, pa_register, pa_stream, paio_messagequeue;
 
 type
+
+  { TPAFlacSource }
+
   TPAFlacSource = class (TPAStreamSource, IPAStream, IPAPlayable)
   protected
     procedure SetStream(AValue: TStream); override;
-    procedure HandleMessage(var AMsg: TPAIOMessage); override;
+    function HandleMessage(var AMsg: TPAIOMessage): Boolean; override;
   private
     FFlac: TFlacStreamDecoder;
     FIgnore: Boolean;
@@ -39,6 +42,7 @@ type
   protected
     function InternalOutputToDestination: Boolean; override;
   public
+    destructor Destroy; override;
     procedure Play;
     procedure Pause;
     procedure Stop;
@@ -53,6 +57,15 @@ uses
   paio_types;
 
 { TPAFlacSource }
+
+destructor TPAFlacSource.Destroy;
+begin
+  // stop the worker thread (which uses FFlac in InternalOutputToDestination)
+  // before freeing FFlac, then let the ancestor free the stream.
+  DestroyWaitSync;
+  FreeAndNil(FFlac);
+  inherited Destroy;
+end;
 
 procedure TPAFlacSource.SetStream(AValue: TStream);
 begin
@@ -77,13 +90,16 @@ begin
   end;
 end;
 
-procedure TPAFlacSource.HandleMessage(var AMsg: TPAIOMessage);
+function TPAFlacSource.HandleMessage(var AMsg: TPAIOMessage): Boolean;
 begin
+  Result := True;
   case AMsg.Message of
     PAM_Seek:
       begin
         InternalSetPosition(AMsg.Data);
       end;
+  else
+    Result := FAlse;
   end;
 end;
 

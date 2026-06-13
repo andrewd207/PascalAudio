@@ -1,6 +1,7 @@
 unit paio_ogg_container;
 
 {$mode objfpc}{$H+}
+{$modeswitch advancedrecords}
 
 interface
 
@@ -13,7 +14,10 @@ type
   { TOggPageHeader }
 
   POggPageHeader = ^TOggPageHeader;
-  TOggPageHeader = object
+  // a record (not object) so its dynamic SegmentSize field is finalized
+  // automatically in every context (locals, fields, copies, temporaries) —
+  // old-style objects leak managed fields.
+  TOggPageHeader = record
   private
     function GetisFirstOfLogicalBitstream: Boolean;
     function GetisFreshPacket: Boolean;
@@ -32,7 +36,7 @@ type
     _PacketCount: Integer;
     _DataSize: Integer;
     _LastPacketNeedsNextPage: Boolean;
-    constructor ReadFromStream(AStream: TStream; AFillOtherData: Boolean);
+    procedure ReadFromStream(AStream: TStream; AFillOtherData: Boolean);
     property isFreshPacket: Boolean read GetisFreshPacket;
     property isFirstPageOfLogicalBitstream: Boolean read GetisFirstOfLogicalBitstream;
     property isLastPageOfLogicalBitstream: Boolean read GetisLastPageOfLogicalBitstream;
@@ -63,7 +67,7 @@ begin
   Result := Flags and 4 = 4;
 end;
 
-constructor TOggPageHeader.ReadFromStream(AStream: TStream;
+procedure TOggPageHeader.ReadFromStream(AStream: TStream;
   AFillOtherData: Boolean);
 var
   i: Byte;

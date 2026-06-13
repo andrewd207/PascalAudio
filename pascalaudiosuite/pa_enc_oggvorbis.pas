@@ -47,6 +47,7 @@ type
   protected
     function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; override;
     procedure EndOfData; override;
+    procedure BeforeStreamFree; override;
     procedure SetStream(AValue: TStream); override;
 
   public
@@ -184,6 +185,15 @@ procedure TPAOggVorbisEncoderLink.EndOfData;
 begin
   FinishEncode;
   inherited EndOfData;
+end;
+
+procedure TPAOggVorbisEncoderLink.BeforeStreamFree;
+begin
+  // if the encode was interrupted (EndOfData never ran), flush the trailing ogg
+  // pages + EOS and clear libvorbis state before the stream is freed, so the
+  // output isn't truncated and the vorbis structures don't leak.
+  if FInited then
+    FinishEncode;
 end;
 
 procedure TPAOggVorbisEncoderLink.SetStream(AValue: TStream);

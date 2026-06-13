@@ -59,6 +59,9 @@ type
     procedure SetStream(AValue: TStream); virtual;
     function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; override;
     procedure EndOfData; override;
+    // called during Destroy after the worker thread has stopped but before the
+    // stream is freed; subclasses (e.g. WAV) finalize/patch the stream here.
+    procedure BeforeStreamFree; virtual;
   public
     constructor Create(AStream: TStream; AOwnsStream: Boolean); virtual;
     destructor  Destroy; override;
@@ -176,10 +179,19 @@ begin
   Format := afRaw;
 end;
 
+procedure TPAStreamDestination.BeforeStreamFree;
+begin
+  // default: nothing. subclasses finalize the stream here.
+end;
+
 destructor TPAStreamDestination.Destroy;
 begin
-  Stream := nil; // this will free the stream if we own it.
+  // Stop the worker thread first (inherited) so it can't write to the stream
+  // after we free it. When we own the stream, releasing it before the thread
+  // stopped was a use-after-free.
   inherited Destroy;
+  BeforeStreamFree;
+  Stream := nil; // this will free the stream if we own it.
 end;
 
 { TPAStreamSource }

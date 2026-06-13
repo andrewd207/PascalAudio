@@ -41,14 +41,14 @@ var
 begin
   if Assigned(FRender) then
     Exit;
-  WriteLn('init');
+  //WriteLn('init');
 
   FClient := FDevice.ActivateClient;
   FClient.Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 10000000, 0, FMixFormat);
   FBufferSize := FClient.BufferSize;
 
   FRender := FClient.GetRenderClient;
-  WriteLn('init end');
+  //WriteLn('init end');
 end;
 
 procedure TPAMMDestination.DeInit;
@@ -108,7 +108,7 @@ begin
       Dec(ACount, lDataSize);
       if lStart then
       begin
-        WriteLn('start');
+        //WriteLn('start');
         FClient.start;
         lStart:=False;
       end;
@@ -137,12 +137,13 @@ end;
 
 destructor TPAMMDestination.Destroy;
 begin
+  // stop the worker thread first; it uses FClient/FRender in InternalProcessData,
+  // so freeing them before the thread stopped was a use-after-free.
+  inherited Destroy;
   DeInit;
   FreeAndNil(FClient);
   FreeAndNil(FDevice);
   FreeAndNil(FEnum);
-  inherited Destroy;
-  Writeln('Destroyed Device');
 end;
 
 initialization
