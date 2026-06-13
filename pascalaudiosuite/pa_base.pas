@@ -19,7 +19,7 @@ unit pa_base;
 interface
 
 uses
-  Classes, SysUtils, syncobjs, pa_lists, paio_types, paio_messagequeue;
+  Classes, SysUtils, syncobjs, pa_lists, paio_types, paio_messagequeue, fgl;
 
 const
   AUDIO_BUFFER_SIZE  = paio_types.AUDIO_BUFFER_SIZE;
@@ -185,7 +185,7 @@ type
     procedure BeforeExecuteLoop; virtual;
     procedure AfterExecuteLoop; virtual;
     function InternalOutputToDestination: Boolean; virtual; abstract;
-    procedure HandleMessage(var AMsg: TPAIOMessage); virtual;
+    function HandleMessage(var AMsg: TPAIOMessage): Boolean; virtual;
     // IPAAudioSource
     procedure AddDestination(AValue: IPAAudioDestination); virtual;
     procedure RemoveDestination(AValue: IPAAudioDestination); virtual;
@@ -196,7 +196,7 @@ type
     procedure ClearSignal;
 
   private
-    FDestinations: TFPList;
+    FDestinations: specialize TFPGList<IPAAudioDestination>;
     FWorking: Boolean;
   public
     constructor Create; override;
@@ -291,6 +291,9 @@ type
 
   TPAAudioLinkClass = class of TPAAudioLink;
   // TAudioLink has something before and something after it in the chain
+
+  { TPAAudioLink }
+
   TPAAudioLink = class(TPAAudioSource, IPAAudioSource, IPAAudioDestination, IPAAudioInformation)
   private
     FDataSource: IPAAudioSource;
@@ -314,6 +317,8 @@ type
     procedure SetDataEvent;
     procedure EndOfData; virtual; // called by audiosource
     function  GetObject: TObject;
+
+    procedure Execute; override;
   public
     constructor Create; override;
     destructor  Destroy; override;
@@ -497,11 +502,24 @@ end;
 function TPABufferPool.CheckWaitFor(ABuffer: PAudioBuffer): Boolean;
 var
   Event: TPABufferEvent;
+  Freed: Boolean = False;
 begin
+  if ABuffer = nil then
+    Raise Exception.Create('Trying to insert a null buffer into the queue');
   Result := False;
   WriteAvailBuffers;
-  Event := TPABufferEvent(FWaitList.GetObject);
-  if Event <> nil then
+  repeat
+    Freed := False;
+    Event := TPABufferEvent(FWaitList.GetObject);
+    if Assigned(Event) and Event.OwnerDestroyed then
+    begin
+      Event.OwnerDestroyed := False; // not needed but
+      FreeAndNil(Event);
+      Freed := True;
+    end;
+  until Freed = False;
+
+  if (Event <> nil) then
   begin
     Result := True;
     //WriteLn('Pool: Buffer given to wait event, 0x',hexStr(Pointer(ABuffer)));
@@ -529,14 +547,18 @@ begin
   //WriteLn('Allocating Buffers: ', ACount);
 
     for I := 0 to ACount-1 do begin
-      Buf := AllocMem(SizeOF(TAudioBuffer)); // memory is 0's
+      Buf := GetMem(SizeOF(TAudioBuffer));
+      FillChar(Buf^, SizeOf(TAudioBuffer), 0); // make sure it's zero
       if not CheckWaitFor(Buf) then
       begin
         FBufferList.AddItem(Buf);
       end;
       EnterCriticalsection(FCrit);
-      FBuffers.Add(Buf); // this is to free the memory
-      LeaveCriticalsection(FCrit);
+      try
+        FBuffers.Add(Buf); // this is to free the memory
+      finally
+        LeaveCriticalsection(FCrit);
+      end;
     end;
 
 end;
@@ -564,25 +586,31 @@ begin
     FWaitList.AddObject(WaitEvent);
     repeat
       Res := WaitEvent.WaitFor(1000);
-      if not (Res in [wrSignaled, wrTimeout]) then
-        ;//WriteLn(StdErr, 'Pool: WaitFor = ', Res);
-      if Res = wrTimeout then
-      begin
-        //WriteLn(StdErr, 'Pool WaitforTimedOut waiting for buffer Available = ', FBufferList.Count);
-        Result := PAudioBuffer(FBufferList.GetItem);
-        if Result <> nil then
-          Break;
+      case Res of
+        wrTimeout:
+          begin
+            // try to get a buffer again
+            //WriteLn(StdErr, 'Pool WaitforTimedOut waiting for buffer Available = ', FBufferList.Count);
+            Result := PAudioBuffer(FBufferList.GetItem);
+            if Assigned(Result) then
+            begin
+              WaitEvent.Buffer:=nil;
+              WaitEvent.OwnerDestroyed:=True;
+            end;
+          end;
+        wrAbandoned: break;
+        wrSignaled:
+          begin
+            Result := WaitEvent.Buffer;
+            FreeAndNil(WaitEvent);
+            Break;
+          end;
       end;
-
-    until Res = wrSignaled;
-    WaitEvent.ResetEvent;
+    until Result <> nil;
     //WriteLn('Pool: Buffer from wait event, 0x',hexStr(Pointer(WaitEvent.Buffer)));
-    Result := WaitEvent.Buffer;
-    WaitEvent.Buffer:=nil;
-    WaitEvent.Free;
-    if Result = nil then
-      WriteLn(StdErr, 'Error nil Buffer from waitlist!');
 
+    if Result = nil then
+      raise Exception.Create('Error nil Buffer from waitlist!');
   end;
 
   //WriteLn('Got Buffer from pool');
@@ -593,9 +621,9 @@ var
   WaitEvent: PBufferWaitEvent;
 begin
   if ABuffer = nil then
-    Exit;
+    Raise Exception.Create('Tried to add a nil buffer to pool');
   if BufferInPool(ABuffer) then
-    WriteLn('!!!!!!!!!!!!!!!!!!! !!!!!!!!!!!!!!!!!!!!!!! Buffer already in pool!!!!!!!!');
+    Raise Exception.Create('Buffer already in pool!');
   WriteAvailBuffers;
   //WriteLN('Pool: Buffer available');
   ABuffer^.IsEndOfData:=False;
@@ -753,6 +781,7 @@ var
   RealDataSize: Integer;
   Msg: TPAIOMessage;
 begin
+
   while not Terminated do
   begin
     try
@@ -760,6 +789,7 @@ begin
       if Res = wrSignaled then
       begin
         case Msg.Message of
+        PAM_DataEnd: ;
         PAM_Data :
           begin
             Buffer := FBufferManager.NextFilledBuffer;
@@ -776,6 +806,8 @@ begin
                     RealData:=@Buffer^.Data;
                     RealDataSize:=Buffer^.UsedData;
                   end;
+                  if Buffer^.IsEndOfData then
+                    Buffer^.IsEndOfData := True; // for debugging
 
                   InternalProcessData(RealData^, RealDataSize, Buffer^.IsEndOfData);
                 except
@@ -892,7 +924,7 @@ begin
 
   //WriteLn(Classname, ' Internal Output to dest');
   Buf := FBufferManager.NextFilledBuffer;
-  Result := Buf <> nil;
+  Result := True;
   if Assigned(Buf) then
   begin
    // this causes the specialized descendant to process the data and produce output.
@@ -923,12 +955,6 @@ begin
    BufferPool.ReturnBufferToPool(Buf);
   end;
 
-  if FBufferManager.Empty and (((Buf = nil) or Buf^.IsEndOfData) and FDataIsEnded) then
-  begin
-    SignalDestinationsDone; // ....
-    Result := False;
-  end;
-
 end;
 
 function TPAAudioLink.GetDataSource: IPAAudioSource;
@@ -957,7 +983,7 @@ end;
 
 procedure TPAAudioLink.SetDataEvent;
 begin
-  FMsgQueue.PostMessage(PAM_DataEnd);
+  FMsgQueue.PostMessage(PAM_Data);
   //WriteLn(Classname,' setdataevent');
 end;
 
@@ -978,6 +1004,83 @@ end;
 function TPAAudioLink.GetObject: TObject;
 begin
   REsult := Self;
+end;
+
+procedure TPAAudioLink.Execute;
+var
+  BeforeLoopCalled: Boolean;
+  Res: TWaitResult;
+  Msg: TPAIOMessage;
+  BufferMessage: TPABufferMessage absolute Msg;
+begin
+  BeforeLoopCalled:=False;
+  while not Terminated do
+  begin
+    try
+    Res := FMsgQueue.WaitMessage(1000, Msg);
+    case Res of
+    wrSignaled:
+    begin
+      WriteLn('Link message: ', Msg.Message);
+      case Msg.Message of
+      PAM_Data:
+        begin
+          if not BeforeLoopCalled then
+          begin
+            BeforeLoopCalled:=True;
+            BeforeExecuteLoop;
+          end;
+        //WriteLn(ClassName,' :Source Loop');
+          InternalOutputToDestination;
+        end;
+      PAM_DataEnd: SignalDestinationsDone; // this message should only be Sent from the datasource
+      PAM_StopWorking: FWorking := False;
+      PAM_ObjectIsDestroying:
+        begin
+          Terminate;
+          FFreeEvent.SetEvent;
+        end;
+      PAM_SendBuffer:
+        begin
+          if not BufferMessage.Dest.WriteBuffer(BufferMessage.Buffer) then
+          begin
+           // make sure this is sent before we process more data
+           // insert message before other data messages but after other messages like PAM_ObjectIsDestroying
+           //WriteLn('Couldn''t send buffer re-queing it');
+           FMsgQueue.InsertBefore([PAM_Data, PAM_SendBuffer, PAM_DataEnd], Msg);
+           Msg := nil; // to avoid freeing since it's back in the queue
+          end
+          else
+            BufferMessage.Buffer:=nil; // otherwise when the message is freed it will return the buffer to the pool
+        end;
+      else
+        // it is a message specific for the child to choose to handle
+        if not HandleMessage(Msg) then
+          Raise Exception.Create('Unhandled message');
+
+      end;
+      // free the consumed message. branches that re-queue it (PAM_SendBuffer)
+      // set Msg := nil so it is not freed here.
+      if Assigned(Msg) then
+        Msg.Free;
+    end;
+    wrTimeout: ; // maybe reset event after a while?
+    else
+      ;//WriteLn(StdErr, ClassName,' waitfor = ', Res);  // Triggered when Freed
+
+    end;
+
+    except
+      on E: Exception do
+      begin
+        WriteLn(ClassName+' Exception: '+E.Message);
+        Synchronize(@RaiseE);
+      end;
+    end;
+  end;
+  AfterExecuteLoop;
+  WriteLn('Left LOOP!');
+
 end;
 
 procedure TPAAudioSource.EnsureAudioBuffer;
@@ -1008,6 +1111,7 @@ begin
   FMsgQueue.InsertMessage(PAM_ObjectIsDestroying);
   FFreeEvent.WaitFor(5000); // wait up to 5 seconds for execute to finish
   FFreeEvent.Free; // but don't set to nil!
+  Result := True;
 end;
 
 procedure TPAAudioSource.Execute;
@@ -1016,7 +1120,9 @@ var
   Res: TWaitResult;
   Msg: TPAIOMessage;
   BufferMessage: TPABufferMessage absolute Msg;
+  lName: String;
 begin
+  lName := ClassName;
   BeforeLoopCalled:=False;
   while not Terminated do
   begin
@@ -1025,6 +1131,11 @@ begin
     case Res of
     wrSignaled:
     begin
+      if Self.ClassName = 'TPAResampleLink' then
+      begin
+         WriteLn('Msg Count = ',  FMsgQueue.Count);
+         WriteLn('MSG: ', Msg.Message);
+      end;
       case Msg.Message of
       PAM_Data:
         begin
@@ -1036,13 +1147,14 @@ begin
         //WriteLn(ClassName,' :Source Loop');
           if InternalOutputToDestination = False then
           begin
-          //WriteLn('Stopping Data');
+          WriteLn('Stopping Data');
             StopData;
           end
           else
           begin
             // keep processing data
-            FMsgQueue.PostMessage(PAM_Data);
+            if not Self.InheritsFrom(TPAAudioLink) then
+              FMsgQueue.PostMessage(PAM_Data);
           end;
         end;
       PAM_StopWorking: FWorking := False;
@@ -1053,6 +1165,8 @@ begin
         end;
       PAM_SendBuffer:
         begin
+          //WriteLn(ClassName, ' writing buffer to dest from message');
+
           if not BufferMessage.Dest.WriteBuffer(BufferMessage.Buffer) then
           begin
            // make sure this is sent before we process more data
@@ -1066,11 +1180,14 @@ begin
         end;
       else
         // it is a message specific for the child to choose to handle
-        HandleMessage(Msg);
-        if Assigned(Msg) then
-          Msg.Free;
+        if not HandleMessage(Msg) then
+          Raise Exception.Create('Unhandled message');
 
       end;
+      // free the consumed message. branches that re-queue it (PAM_SendBuffer)
+      // set Msg := nil so it is not freed here.
+      if Assigned(Msg) then
+        Msg.Free;
     end;
     wrTimeout: ; // maybe reset event after a while?
     else
@@ -1099,8 +1216,9 @@ begin
 
 end;
 
-procedure TPAAudioSource.HandleMessage(var AMsg: TPAIOMessage);
+function TPAAudioSource.HandleMessage(var AMsg: TPAIOMessage): Boolean;
 begin
+  Result := False;
   // messages for the subclasses should be handled here
   // this is called from the context of this thread
 end;
@@ -1109,18 +1227,18 @@ procedure TPAAudioSource.AddDestination(AValue: IPAAudioDestination);
 var
   i: Integer;
 begin
-  i := FDestinations.IndexOf(Pointer(AValue));
+  i := FDestinations.IndexOf(AValue);
   if i >= 0 then
     FDestinations.Delete(i);
 
-  FDestinations.Add(Pointer(AValue));
+  FDestinations.Add(AValue);
 end;
 
 procedure TPAAudioSource.RemoveDestination(AValue: IPAAudioDestination);
 var
   i: Integer;
 begin
-  i := FDestinations.IndexOf(Pointer(AValue));
+  i := FDestinations.IndexOf(AValue);
   if i >= 0 then
     FDestinations.Delete(i);
 end;
@@ -1215,6 +1333,7 @@ begin
     // ok now we have a buffer
     Tmp := FDestBuf;
     WCount := Min(ASize, AUDIO_BUFFER_SIZE-FDestBuf^.UsedData);
+
     Move(PByte(@AData)[Result], FDestBuf^.Data[FDestBuf^.UsedData], WCount);
     Inc(FDestBuf^.UsedData, WCount);
     Inc(Result, WCount);
@@ -1295,7 +1414,7 @@ end;
 constructor TPAAudioSource.Create;
 begin
   inherited Create;
-  FDestinations := TFPList.Create;
+  FDestinations := specialize TFPGList<IPAAudioDestination>.create;
   BufferPool.AllocateBuffers(1);
 end;
 
@@ -1321,7 +1440,11 @@ end;
 procedure TPAAudioSource.StopData;
 begin
   if FWorking then
-  FMsgQueue.PostMessage(PAM_StopWorking);
+  begin
+    if Assigned(FDestBuf) and (FDestBuf^.UsedData > 0) then
+      FMsgQueue.PostMessage(PAM_SendBuffer);
+    FMsgQueue.PostMessage(PAM_StopWorking);
+  end;
 end;
 
 constructor TPAAudioLink.Create;

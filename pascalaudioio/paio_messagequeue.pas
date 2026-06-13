@@ -41,12 +41,16 @@ type
 
 
   // A threadsafe message queue
+
+  { TPAIOMessageQueue }
+
   TPAIOMessageQueue = class
   private
     FLock: TRTLCriticalSection;
     FFirst: TPAIOMessage;
     FLast: TPAIOMessage;
     FHasMessage: TSimpleEvent;
+    FCount: Integer;
     procedure FreeMessages;
   public
     constructor Create;
@@ -61,6 +65,7 @@ type
     procedure   InsertBefore(AMessages: array of Integer; AMsgObject: TPAIOMessage); // message will be inserted before messages of [types]
     function    WaitMessage(ATimeout: Integer; var AMsg: TPAIOMessage): TWaitResult;
     function    WaitMessage(ATimeout: Integer): TWaitResult;
+    function    Count: Integer;
   end;
 
 implementation
@@ -108,17 +113,16 @@ end;
 procedure TPAIOMessageQueue.PostMessage(AMessage: TPAIOMessage);
 begin
   EnterCriticalsection(FLock);
+  Inc(FCount);
   try
-    if not Assigned(FLast) then
-    begin
-      FFirst := AMessage;
-      FLast := AMessage;
-    end
-    else
-    begin
+    if Assigned(FLast) then
       FLast.FNext := AMessage;
-      FLast := AMessage;
-    end;
+
+    if not Assigned(FFirst) then
+      FFirst := AMessage;
+
+    FLast := AMessage;
+    AMessage.FNext := nil;
 
   finally
     FHasMessage.SetEvent;
@@ -151,16 +155,23 @@ begin
   try
     if Assigned(FFirst) then
     begin
+      Dec(FCount);
       Result := FFirst;
       FFirst := FFirst.FNext;
-      Result.FNext := nil;
-      if FFirst = nil then
+      //Result.FNext := nil;
+      if Result = FLast then
       begin
         FLast := nil;
+        if FCount > 0 then
+          Raise Exception.Create('Message reference shenanigans');
         FHasMessage.ResetEvent;
       end;
-    end;
+
+    end
+    else if FCount > 0 then
+      Raise Exception.Create('Message reference shenanigans');
   finally
+
     LeaveCriticalsection(FLock);
   end;
 end;
@@ -178,18 +189,14 @@ end;
 procedure TPAIOMessageQueue.InsertMessage(AMsg: TPAIOMessage);
 begin
   EnterCriticalsection(FLock);
+  Inc(FCount);
   try
-    if not Assigned(FFirst) then
-    begin
-      FFirst := AMsg;
+    AMsg.FNext := FFirst;
+    if FLast = nil then
       FLast := AMsg;
-    end
-    else
-    begin
-      AMsg.FNext := FFirst;
-      FFirst := AMsg;
-    end;
+    FFirst := AMsg;
   finally
+    if (AMsg.FNext = nil) and (AMsg <> FLast) then Raise Exception.Create('invalid insertion onto queue');
     FHasMessage.SetEvent;
     LeaveCriticalsection(FLock);
   end;
@@ -211,41 +218,56 @@ var
   Prev: TPAIOMessage = nil;
   Current: TPAIOMessage;
 begin
-  if not Assigned(FFirst) then
-  begin
-    PostMessage(AMsgObject);
-    Exit;
-  end;
   EnterCriticalsection(FLock);
   try
+    if not Assigned(FFirst) then
+    begin
+      PostMessage(AMsgObject);
+      Exit;
+    end;
+
     Current := FFirst;
     repeat
       if Current.Message in AMessages then
       begin
+        Inc(Fcount);
         AMsgObject.FNext := Current;
         if Assigned(Prev) then
           Prev.FNext := AMsgObject
         else
+        begin
+          if Current <> FFirst then
+            Raise Exception.Create('bad');
           FFirst := AMsgObject;
+        end;
         Exit;
       end;
       Prev := Current;
       Current := Current.FNext;
     until Current = nil;
-    if Assigned(FLast) then
+    PostMessage(AMsgObject);
+    {if Assigned(FLast) then
       FLast.FNext := AMsgObject
     else
     begin
       FFirst := AMsgObject;
       FLast := AMsgObject;
-    end;
+    end;}
   finally
+    if (AMsgObject.FNext = nil) and (AMsgObject <> FLast) then Raise Exception.Create('invalid insertion onto queue');
     LeaveCriticalsection(FLock);
   end;
 end;
 
 function TPAIOMessageQueue.WaitMessage(ATimeout: Integer; var AMsg: TPAIOMessage): TWaitResult;
 begin
+  {if FCount > 0 then
+  begin
+    Result := wrSignaled;
+    AMsg := PopMessage;
+    if Assigned(AMsg) then
+      Exit;
+  end;}
   Result := FHasMessage.WaitFor(ATimeout);
   if Result = wrSignaled then
     AMsg := PopMessage
@@ -256,6 +278,11 @@ end;
 function TPAIOMessageQueue.WaitMessage(ATimeout: Integer): TWaitResult;
 begin
   Result := FHasMessage.WaitFor(ATimeout);
+end;
+
+function TPAIOMessageQueue.Count: Integer;
+begin
+  Result := FCount;
 end;
 
 end.
