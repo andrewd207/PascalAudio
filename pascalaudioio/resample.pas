@@ -79,7 +79,7 @@ uses
 constructor TResampleChannel.Create;
 begin
   FResample := resample_open(1, 0.1, 7.0);
-  FOutBuffer := TRingBuffer.Create(AUDIO_BUFFER_SIZE*7);
+  FOutBuffer := TRingBuffer.Create(AUDIO_BUFFER_SIZE*20);
 end;
 
 destructor TResampleChannel.Destroy;

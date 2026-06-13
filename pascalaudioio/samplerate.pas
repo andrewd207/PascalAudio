@@ -32,12 +32,25 @@ unit samplerate;
 
 {$mode objfpc}{$H+}
 {$packrecords c}
-{$linklib samplerate}
+//{$linklib samplerate}
+
+
+
+
 
 interface
 
 uses
   ctypes;
+
+{$IFDEF MSWINDOWS}
+const
+  libName = 'samplerate.dll';
+{$ELSE}
+const
+  libName = 'libsamplerate.so';
+{$ENDIF}
+
 
 type
 
@@ -86,7 +99,7 @@ type
 **	Error returned in *error.
 *)
 
-function src_new (converter_type: cint; channels: cint; error: pcint): PSRC_STATE; cdecl; external;
+function src_new (converter_type: cint; channels: cint; error: pcint): PSRC_STATE; cdecl; external libName;
 
 (*
 **	Initilisation for callback based API : return an anonymous pointer to the
@@ -97,27 +110,27 @@ function src_new (converter_type: cint; channels: cint; error: pcint): PSRC_STAT
 *)
 
 function src_callback_new (func: src_callback_t; converter_type: cint; channels: cint;
-				error: pcint;cb_data: pointer): PSRC_STATE; cdecl; external;
+				error: pcint;cb_data: pointer): PSRC_STATE; cdecl; external libName;
 
 (*
 **	Cleanup all internal allocations.
 **	Always returns NULL.
 *)
 
-function src_delete (state: PSRC_STATE): PSRC_STATE; cdecl; external;
+function src_delete (state: PSRC_STATE): PSRC_STATE; cdecl; external libName;
 
 (*
 **	Standard processing function.
 **	Returns non zero on error.
 *)
 
-function src_process (state: PSRC_STATE; data: PSRC_DATA): cint; cdecl; external;
+function src_process (state: PSRC_STATE; data: PSRC_DATA): cint; cdecl; external libName;
 
 (*
 **	Callback based processing function. Read up to frames worth of data from
 **	the converter int *data and return frames read or -1 on error.
 *)
-function src_callback_read (state: PSRC_STATE; src_ratio: cdouble; frames: clong; data: pcfloat): clong; cdecl; external;
+function src_callback_read (state: PSRC_STATE; src_ratio: cdouble; frames: clong; data: pcfloat): clong; cdecl; external libName;
 
 (*
 **	Simple interface for performing a single conversion from input buffer to
@@ -125,7 +138,7 @@ function src_callback_read (state: PSRC_STATE; src_ratio: cdouble; frames: clong
 **	Simple interface does not require initialisation as it can only operate on
 **	a single buffer worth of audio.
 *)
-function src_simple (data: PSRC_DATA; converter_type: cint; channels: cint ): cint; cdecl; external;
+function src_simple (data: PSRC_DATA; converter_type: cint; channels: cint ): cint; cdecl; external libName;
 
 (*
 ** This library contains a number of different sample rate converters,
@@ -136,9 +149,9 @@ function src_simple (data: PSRC_DATA; converter_type: cint; channels: cint ): ci
 ** the given value. The converters are sequentially numbered from 0 to N.
 *)
 
- function src_get_name (converter_type: cint): PChar; cdecl; external;
- function src_get_description (converter_type: cint): PChar; cdecl; external;
- function src_get_version: PChar; cdecl; external;
+ function src_get_name (converter_type: cint): PChar; cdecl; external libName;
+ function src_get_description (converter_type: cint): PChar; cdecl; external libName;
+ function src_get_version: PChar; cdecl; external libName;
 
 (*
 **	Set a new SRC ratio. This allows step responses
@@ -146,7 +159,7 @@ function src_simple (data: PSRC_DATA; converter_type: cint; channels: cint ): ci
 **	Returns non zero on error.
 *)
 
-function src_set_ratio (state: PSRC_STATE; new_ratio: cdouble): cint; cdecl; external;
+function src_set_ratio (state: PSRC_STATE; new_ratio: cdouble): cint; cdecl; external libName;
 
 (*
 **	Reset the internal SRC state.
@@ -155,25 +168,25 @@ function src_set_ratio (state: PSRC_STATE; new_ratio: cdouble): cint; cdecl; ext
 **	Returns non zero on error.
 *)
 
-function src_reset (state: PSRC_STATE): cint; cdecl; external;
+function src_reset (state: PSRC_STATE): cint; cdecl; external libName;
 
 (*
 ** Return TRUE if ratio is a valid conversion ratio, FALSE
 ** otherwise.
 *)
 
-function src_is_valid_ratio (ratio: cdouble ): cint; cdecl; external;
+function src_is_valid_ratio (ratio: cdouble ): cint; cdecl; external libName;
 
 (*
 **	Return an error number.
 *)
 
-function src_error (state: PSRC_STATE): cint; cdecl; external;
+function src_error (state: PSRC_STATE): cint; cdecl; external libName;
 
 (*
 **	Convert the error number into a string.
 *)
-function src_strerror (error: cint): PChar;  cdecl; external;
+function src_strerror (error: cint): PChar;  cdecl; external libName;
 
 (*
 ** The following enums can be used to set the interpolator type
@@ -193,11 +206,11 @@ const
 ** back again.
 *)
 
-procedure src_short_to_float_array (const_in: pcshort; out_data: pcfloat; len: cint) cdecl; external;
-procedure src_float_to_short_array (const_in: pcfloat; out_data: pcshort; len: cint); cdecl; external;
+procedure src_short_to_float_array (const_in: pcshort; out_data: pcfloat; len: cint) cdecl; external libName;
+procedure src_float_to_short_array (const_in: pcfloat; out_data: pcshort; len: cint); cdecl; external libName;
 
-procedure src_int_to_float_array (const_in: pcint; out_data: pcfloat; len: cint); cdecl; external;
-procedure src_float_to_int_array (const_in: pcfloat; out_data: pcint; len: cint); cdecl; external;
+procedure src_int_to_float_array (const_in: pcint; out_data: pcfloat; len: cint); cdecl; external libName;
+procedure src_float_to_int_array (const_in: pcfloat; out_data: pcint; len: cint); cdecl; external libName;
 
 
 implementation
