@@ -152,6 +152,10 @@ end;
 
 destructor TPAResampleLink.Destroy;
 begin
+  // stop the worker thread (which uses FResampleHelper in InternalProcessData)
+  // before freeing it. FinishConvert is never called, so free it here too.
+  DestroyWaitSync;
+  FreeAndNil(FResampleHelper);
   inherited Destroy;
 end;
 

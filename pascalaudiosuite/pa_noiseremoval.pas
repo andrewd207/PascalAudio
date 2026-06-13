@@ -130,8 +130,17 @@ begin
 end;
 
 destructor TPANoiseRemovalLink.Destroy;
+var
+  i: Integer;
 begin
-  FHelper.Free;
+  // stop the worker thread (which uses FHelper/FNoise in InternalProcessData)
+  // before freeing them. The channel helper does not own the FNoise objects
+  // (corba interfaces aren't refcounted), so free them explicitly here.
+  DestroyWaitSync;
+  FreeAndNil(FHelper);
+  for i := Low(FNoise) to High(FNoise) do
+    FNoise[i].Free;
+  SetLength(FNoise, 0);
   inherited Destroy;
 end;
 
