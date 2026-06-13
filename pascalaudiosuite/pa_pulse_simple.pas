@@ -102,7 +102,18 @@ end;
 
 destructor TPAPulseDestination.Destroy;
 begin
+  // inherited stops the worker thread (it uses FPulse in InternalProcessData).
   inherited Destroy;
+  // FPulse is normally freed by DeInit when the last buffer arrives; if playback
+  // was interrupted (destroyed mid-stream) that never ran, so free it here to
+  // avoid leaking the pulse connection.
+  if FInited and Assigned(FPulse) then
+  begin
+    FPulse^.Drain(nil);
+    FPulse^.Free;
+    FPulse := nil;
+    FInited := False;
+  end;
 end;
 initialization
   PARegister(partDeviceOut, TPAPulseDestination, 'PulseAudio');

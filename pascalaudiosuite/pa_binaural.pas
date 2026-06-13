@@ -49,6 +49,7 @@ implementation
 
 procedure TPABinauralLink.InitData;
 begin
+  FInited:=True; // otherwise InitData re-opens a new bs2bd every buffer (leak)
   FInstance:=Tbs2bd.Open;
   FInstance^.SampleRate:=SamplesPerSecond;
   FInstance^.Level:=Level;
@@ -65,7 +66,10 @@ begin
   if not FInited then
     InitData;
 
-  Samples := SizeOf(Single) div ACount div 2;
+  // frames = bytes / bytes-per-float / 2 channels. The operands were inverted
+  // (SizeOf(Single) div ACount div 2), which is 0 for any real buffer, so
+  // CrossFeed_f processed nothing and the effect was a silent no-op.
+  Samples := ACount div SizeOf(Single) div 2;
 
   B := BufferPool.GetBufferFromPool(True);
 
@@ -107,6 +111,9 @@ end;
 
 destructor TPABinauralLink.Destroy;
 begin
+  // stop the worker thread (it uses FInstance in InternalProcessData) before
+  // closing the bs2b instance.
+  DestroyWaitSync;
   if FInited then
     FInstance^.Close;
   inherited Destroy;

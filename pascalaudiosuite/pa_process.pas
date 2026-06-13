@@ -149,6 +149,9 @@ end;
 
 destructor TPAProcessSource.Destroy;
 begin
+  // stop the worker thread first: InternalOutputToDestination reads FProcess
+  // continuously, so freeing it before the thread stops is a use-after-free.
+  DestroyWaitSync;
   if FProcess.Running then
     FProcess.Terminate(0);
   FProcess.Free;

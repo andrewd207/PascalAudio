@@ -257,6 +257,10 @@ end;
 
 destructor TPAAudioCDSource.Destroy;
 begin
+  // stop the worker thread first: InternalOutputToDestination issues ioctls on
+  // FHandle, so DeInit (which FpClose's it) before the thread stops is a
+  // use-after-free on the file descriptor.
+  DestroyWaitSync;
   DeInit;
   inherited Destroy;
 end;
