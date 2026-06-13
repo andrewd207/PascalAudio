@@ -17,18 +17,19 @@ var
   ogg: TPAOggVorbisDecoderSource;
 begin
   // extract raw float32 data from
-  ogg := TPAOggVorbisDecoderSource.Create;
-  ogg.Stream := TFileStream.Create(AFile, fmOpenRead or fmShareDenyNone);
+  ogg := TPAOggVorbisDecoderSource.Create(TFileStream.Create(AFile, fmOpenRead or fmShareDenyNone), True);
+  //ogg.Stream := ;
+
   Result := TMemoryStream.Create;
-  StreamDest := TPAStreamDestination.Create(Result);
+  StreamDest := TPAStreamDestination.Create(Result, True);
   StreamDest.DataSource := ogg;
   ogg.StartData;
   sleep(1000);
-  ogg.Stream.Free;
+  //ogg.Stream.Free;
   ogg.Free;
   while StreamDest.Working  do
     sleep(1);
-  StreamDest.Free;
+  //StreamDest.Free;
   Result.Position:=0;
 end;
 
