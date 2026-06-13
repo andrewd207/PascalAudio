@@ -99,7 +99,8 @@ begin
       FFirst := Tmp^.Next;
 
       // check if we just used the last item in the list
-      if Tmp = FLast then
+      //if Tmp = FLast then
+      if FFirst = nil then
         FLast := nil;
       Dec(FCount);
       Dispose(Tmp);
@@ -112,7 +113,12 @@ end;
 
 function TPAFifoList.Count: Integer;
 begin
-  Result := FCount;
+  EnterCriticalsection(FCrit);
+  try
+    Result := FCount;
+  finally
+    LeaveCriticalsection(FCrit);
+  end;
 end;
 
 function TPAFifoList.Contains(AItem: Pointer): Boolean;

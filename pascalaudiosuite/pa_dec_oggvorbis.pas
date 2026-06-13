@@ -39,7 +39,7 @@ type
     procedure SetStream(AValue: TStream); override;
     function InternalOutputToDestination: Boolean; override;
     procedure SignalDestinationsDone; override;
-    procedure HandleMessage(var AMsg: TPAIOMessage); override;
+    function HandleMessage(var AMsg: TPAIOMessage): Boolean; override;
     // IPAPlayable
     function  CanSeek: Boolean;
     function  GetPosition: Double;
@@ -48,6 +48,7 @@ type
 
   public
     constructor Create(AStream: TStream; AOwnsStream: Boolean); override;
+    destructor Destroy; override;
     procedure InitValues;
     //IPAPlayable
     procedure Play;
@@ -131,12 +132,16 @@ begin
   inherited SignalDestinationsDone;
 end;
 
-procedure TPAOggVorbisDecoderSource.HandleMessage(var AMsg: TPAIOMessage);
+function TPAOggVorbisDecoderSource.HandleMessage(var AMsg: TPAIOMessage
+  ): Boolean;
 begin
+  Result := True;
   case AMsg.Message of
     PAM_Seek:
       if FInited then
         Fogg.TimePosition:=AMsg.Data;
+  else
+    Result := False;
   end;
 end;
 
@@ -173,6 +178,16 @@ constructor TPAOggVorbisDecoderSource.Create(AStream: TStream; AOwnsStream: Bool
 begin
   inherited Create(AStream, AOwnsStream);
   Format:=afFloat32;
+end;
+
+destructor TPAOggVorbisDecoderSource.Destroy;
+begin
+  // stop the worker thread before freeing FOgg, which its Execute loop
+  // (InternalOutputToDestination) reads from. DeInitOgg frees the decoder
+  // object that InitOgg created, otherwise it leaks once per decoder.
+  DestroyWaitSync;
+  DeInitOgg;
+  inherited Destroy;
 end;
 
 procedure TPAOggVorbisDecoderSource.InitValues;

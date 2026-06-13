@@ -174,6 +174,7 @@ type
   private
     E: Exception;
     FFreeEvent: TSimpleEvent; // only used during the destructor
+    FDestroySynced: Boolean;  // ensures DestroyWaitSync only runs once
     FSignaled: Boolean;
     FDestBuf: PAudioBuffer;
     //Datasource: IPAAudioSource;
@@ -494,39 +495,34 @@ end;
 
 function TPABufferEvent.IsSet: Boolean;
 begin
-
+  Result := FIsSet;
 end;
 
 { TPABufferPool }
 
 function TPABufferPool.CheckWaitFor(ABuffer: PAudioBuffer): Boolean;
+// Must be called with FCrit held. Hands ABuffer to the first live waiter and
+// returns True; returns False when there is no waiter (caller keeps the buffer).
 var
   Event: TPABufferEvent;
-  Freed: Boolean = False;
 begin
   if ABuffer = nil then
     Raise Exception.Create('Trying to insert a null buffer into the queue');
   Result := False;
-  WriteAvailBuffers;
+  // Pull waiters until we find a live one. Events flagged OwnerDestroyed belong
+  // to waiters that already self-serviced on timeout; the pool disposes them.
   repeat
-    Freed := False;
     Event := TPABufferEvent(FWaitList.GetObject);
-    if Assigned(Event) and Event.OwnerDestroyed then
-    begin
-      Event.OwnerDestroyed := False; // not needed but
+    if Event = nil then
+      Exit(False);
+    if Event.OwnerDestroyed then
       FreeAndNil(Event);
-      Freed := True;
-    end;
-  until Freed = False;
+  until Assigned(Event);
 
-  if (Event <> nil) then
-  begin
-    Result := True;
-    //WriteLn('Pool: Buffer given to wait event, 0x',hexStr(Pointer(ABuffer)));
-    // The buffer can get sent straight to the object waiting for it
-    Event.Buffer:=ABuffer;
-    Event.SetEvent;
-  end;
+  // hand the buffer straight to the waiting object
+  Event.Buffer := ABuffer;
+  Event.SetEvent;
+  Result := True;
 end;
 
 procedure TPABufferPool.WriteAvailBuffers;
@@ -549,13 +545,11 @@ begin
     for I := 0 to ACount-1 do begin
       Buf := GetMem(SizeOF(TAudioBuffer));
       FillChar(Buf^, SizeOf(TAudioBuffer), 0); // make sure it's zero
-      if not CheckWaitFor(Buf) then
-      begin
-        FBufferList.AddItem(Buf);
-      end;
       EnterCriticalsection(FCrit);
       try
         FBuffers.Add(Buf); // this is to free the memory
+        if not CheckWaitFor(Buf) then
+          FBufferList.AddItem(Buf);
       finally
         LeaveCriticalsection(FCrit);
       end;
@@ -570,68 +564,78 @@ end;
 
 function TPABufferPool.GetBufferFromPool(AWait: Boolean = True): PAudioBuffer;
 var
-  C: Integer;
   WaitEvent: TPABufferEvent;
   Res: TWaitResult;
-  TimeoutCount: Integer = 0;
 begin
-  //WriteLn('Pool: Asking for buffer. Available = ',FBufferList.Count);
-  WriteAvailBuffers;
-  C := FBufferList.Count;
-  Result := PAudioBuffer(FBufferList.GetItem); // can return nil
-  if (Result = nil) and (AWait) then
-  begin
+  // Check the free list and register a waiter as one atomic step, so a
+  // concurrent ReturnBufferToPool can't slip a buffer past us into the list
+  // (it would hand it to our registered waiter instead).
+  EnterCriticalsection(FCrit);
+  try
+    Result := PAudioBuffer(FBufferList.GetItem); // can return nil
+    if Assigned(Result) or not AWait then
+      Exit;
     WaitEvent := TPABufferEvent.Create;
     WaitEvent.ResetEvent;
     FWaitList.AddObject(WaitEvent);
-    repeat
-      Res := WaitEvent.WaitFor(1000);
-      case Res of
-        wrTimeout:
-          begin
-            // try to get a buffer again
-            //WriteLn(StdErr, 'Pool WaitforTimedOut waiting for buffer Available = ', FBufferList.Count);
-            Result := PAudioBuffer(FBufferList.GetItem);
-            if Assigned(Result) then
-            begin
-              WaitEvent.Buffer:=nil;
-              WaitEvent.OwnerDestroyed:=True;
-            end;
-          end;
-        wrAbandoned: break;
-        wrSignaled:
-          begin
-            Result := WaitEvent.Buffer;
-            FreeAndNil(WaitEvent);
-            Break;
-          end;
-      end;
-    until Result <> nil;
-    //WriteLn('Pool: Buffer from wait event, 0x',hexStr(Pointer(WaitEvent.Buffer)));
-
-    if Result = nil then
-      raise Exception.Create('Error nil Buffer from waitlist!');
+  finally
+    LeaveCriticalsection(FCrit);
   end;
 
-  //WriteLn('Got Buffer from pool');
+  repeat
+    Res := WaitEvent.WaitFor(1000);
+    if Res = wrSignaled then
+    begin
+      // CheckWaitFor dequeued our event from FWaitList and gave us a buffer.
+      Result := WaitEvent.Buffer;
+      FreeAndNil(WaitEvent);
+      Break;
+    end;
+
+    // Timed out (or abandoned). Decide atomically vs. ReturnBufferToPool whether
+    // we were just handed a buffer, otherwise try to self-service from the list.
+    EnterCriticalsection(FCrit);
+    try
+      if WaitEvent.IsSet then
+      begin
+        Result := WaitEvent.Buffer;
+        FreeAndNil(WaitEvent);
+      end
+      else
+      begin
+        Result := PAudioBuffer(FBufferList.GetItem);
+        if Assigned(Result) then
+        begin
+          // We grabbed our own buffer. Leave the event in FWaitList but flag it
+          // so a returner disposes it instead of handing it a buffer (which
+          // would orphan that buffer).
+          WaitEvent.Buffer := nil;
+          WaitEvent.OwnerDestroyed := True;
+        end;
+      end;
+    finally
+      LeaveCriticalsection(FCrit);
+    end;
+  until Assigned(Result);
 end;
 
 procedure TPABufferPool.ReturnBufferToPool(ABuffer: PAudioBuffer);
-var
-  WaitEvent: PBufferWaitEvent;
 begin
   if ABuffer = nil then
     Raise Exception.Create('Tried to add a nil buffer to pool');
-  if BufferInPool(ABuffer) then
-    Raise Exception.Create('Buffer already in pool!');
-  WriteAvailBuffers;
-  //WriteLN('Pool: Buffer available');
   ABuffer^.IsEndOfData:=False;
   ABuffer^.UsedData:=0;
 
-  if not CheckWaitFor(ABuffer) then
-  begin
-    FBufferList.AddItem(ABuffer);
+  // Hand the buffer to a waiter or put it back on the free list as one atomic
+  // step (shares FCrit with GetBufferFromPool's check-and-register).
+  EnterCriticalsection(FCrit);
+  try
+    if BufferInPool(ABuffer) then
+      Raise Exception.Create('Buffer already in pool!');
+    if not CheckWaitFor(ABuffer) then
+      FBufferList.AddItem(ABuffer);
+  finally
+    LeaveCriticalsection(FCrit);
   end;
 end;
 
@@ -646,11 +650,19 @@ end;
 destructor TPABufferPool.Destroy;
 var
   P: Pointer;
+  Event: TObject;
 begin
   for P in FBuffers do
     Freemem(P);
   FBuffers.Free;
   FBufferList.Free;
+  // dispose any waiter events still queued (e.g. abandoned on a timeout that
+  // no later ReturnBufferToPool reclaimed).
+  repeat
+    Event := FWaitList.GetObject;
+    if Assigned(Event) then
+      Event.Free;
+  until Event = nil;
   FWaitList.Free;
   DoneCriticalsection(FCrit);
   inherited Destroy;
@@ -716,8 +728,8 @@ begin
     end;
   end;
 
-  if GetQueuedBufferCount >= FBufferCount then
-    WriteLn(FOwner.GetObject.Classname, ' queued buffers = ', GetQueuedBufferCount);
+  //if GetQueuedBufferCount >= FBufferCount then
+  //  WriteLn(FOwner.GetObject.Classname, ' queued buffers = ', GetQueuedBufferCount);
 
   Result := True;
   FBuffers.AddItem(ABuffer);
@@ -1021,7 +1033,7 @@ begin
     case Res of
     wrSignaled:
     begin
-      WriteLn('Link message: ', Msg.Message);
+      //WriteLn('Link message: ', Msg.Message);
       case Msg.Message of
       PAM_Data:
         begin
@@ -1079,7 +1091,7 @@ begin
     end;
   end;
   AfterExecuteLoop;
-  WriteLn('Left LOOP!');
+  //WriteLn('Left LOOP!');
 
 end;
 
@@ -1104,14 +1116,17 @@ end;
 
 function TPAAudioSource.DestroyWaitSync: Boolean;
 begin
-  // it's safe to call DestroyWaitSync at each destructor start and it won't keep setting the event
-  if Assigned(FFreeEvent) then
-    Exit(True);
+  // safe to call at the start of each destructor in the chain: only the first
+  // call posts the destroy message and waits; the rest no-op via FDestroySynced.
+  Result := True;
+  if FDestroySynced then
+    Exit;
+  FDestroySynced := True;
   FFreeEvent := TSimpleEvent.Create;
   FMsgQueue.InsertMessage(PAM_ObjectIsDestroying);
-  FFreeEvent.WaitFor(5000); // wait up to 5 seconds for execute to finish
-  FFreeEvent.Free; // but don't set to nil!
-  Result := True;
+  FFreeEvent.WaitFor(5000); // wait up to 5 seconds for execute to finish.
+  // The worker sets FFreeEvent before WaitFor can return, so it's done with it.
+  FreeAndNil(FFreeEvent);
 end;
 
 procedure TPAAudioSource.Execute;
@@ -1131,11 +1146,6 @@ begin
     case Res of
     wrSignaled:
     begin
-      if Self.ClassName = 'TPAResampleLink' then
-      begin
-         WriteLn('Msg Count = ',  FMsgQueue.Count);
-         WriteLn('MSG: ', Msg.Message);
-      end;
       case Msg.Message of
       PAM_Data:
         begin
@@ -1147,7 +1157,7 @@ begin
         //WriteLn(ClassName,' :Source Loop');
           if InternalOutputToDestination = False then
           begin
-          WriteLn('Stopping Data');
+            //WriteLn('Stopping Data');
             StopData;
           end
           else
@@ -1456,6 +1466,9 @@ end;
 
 destructor TPAAudioLink.Destroy;
 begin
+  // stop the worker thread before freeing the resources its Execute loop uses
+  // (FBufferManager / FCrit), otherwise it can touch them after they're gone.
+  DestroyWaitSync;
   FBufferManager.Free;
   DoneCriticalsection(FCrit);
   inherited Destroy;

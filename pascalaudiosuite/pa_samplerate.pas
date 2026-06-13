@@ -120,7 +120,7 @@ var
   SourceChannels: Integer;
   res: cint;
 begin
-   WriteLn('samplerate process');
+  //WriteLn('samplerate process');
   if not FInited then
     InitData;
 
@@ -138,7 +138,7 @@ begin
   // alloc enough memory for before and after frames. whichever is greater
   OutDataSize := Max(ACount, Trunc(ACount * sdata.src_ratio))+100;
   OutDataSize := ACount * 4 + 4;
-  WriteLn('DataSize : ', OutDataSize, ' : ', ACount * 4 + 4);
+  //WriteLn('DataSize : ', OutDataSize, ' : ', ACount * 4 + 4);
   OutData := GetMem(OutDataSize);
 
   //src_short_to_float_array(pcshort(@AData), ConvertedToFloat, ACount div BytesPerSample(Format));
@@ -186,6 +186,7 @@ constructor TPASampleRateLink.Create;
 begin
   inherited Create;
   FOutSamplesPerSecond:=44100;
+  FOutChannels:=2;
   FFormat:=afFloat32;
 end;
 

@@ -282,7 +282,12 @@ end;
 
 function TPAIOMessageQueue.Count: Integer;
 begin
-  Result := FCount;
+  EnterCriticalsection(FLock);
+  try
+    Result := FCount;
+  finally
+    LeaveCriticalsection(FLock);
+  end;
 end;
 
 end.
