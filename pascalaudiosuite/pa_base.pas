@@ -279,6 +279,12 @@ type
     function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; virtual; abstract;
     procedure EndOfData; virtual;
     function  GetObject: TObject;
+    // a destination's channel count / sample rate describe the audio it
+    // receives, so report the upstream source's values (like TPAAudioLink does)
+    // rather than the defaults. Encoders/sinks read these (e.g. the vorbis
+    // encoder and WAV header) and otherwise saw 2ch / 44100 for every source.
+    function  GetChannels: Integer; override;
+    function  GetSamplesPerSecond: Integer; override;
   public
     constructor Create; override;
     destructor  Destroy; override;
@@ -352,7 +358,17 @@ function BufferPool: TPABufferPool; // threadsafe class
 
 implementation
 uses
-  paio_utils;
+  paio_utils, Math;
+
+// Audio DSP and the C codec libraries (libvorbis, libsamplerate, ...) routinely
+// produce denormals, NaNs and infinities as ordinary intermediate values. FPC
+// leaves the FPU exceptions unmasked by default, and the control word is
+// per-thread, so each worker thread must mask them or libvorbis float math
+// raises "Floating point overflow/invalid operation/division by zero".
+procedure MaskAudioFPExceptions;
+begin
+  SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow, exUnderflow, exPrecision]);
+end;
 
 var
   InternalBufferPool: TPABufferPool = nil;
@@ -764,6 +780,7 @@ var
   RealDataSize: Integer;
   Msg: TPAIOMessage;
 begin
+  MaskAudioFPExceptions;
 
   while not Terminated do
   begin
@@ -833,6 +850,22 @@ end;
 function TPAAudioDestination.GetDataSource: IPAAudioSource;
 begin
   Result := FDataSource;
+end;
+
+function TPAAudioDestination.GetChannels: Integer;
+begin
+  if Assigned(DataSource) and (DataSource.GetSourceObject is IPAAudioInformation) then
+    Result := (DataSource.GetSourceObject as IPAAudioInformation).GetChannels
+  else
+    Result := inherited GetChannels;
+end;
+
+function TPAAudioDestination.GetSamplesPerSecond: Integer;
+begin
+  if Assigned(DataSource) and (DataSource.GetSourceObject is IPAAudioInformation) then
+    Result := (DataSource.GetSourceObject as IPAAudioInformation).GetSamplesPerSecond
+  else
+    Result := inherited GetSamplesPerSecond;
 end;
 
 procedure TPAAudioDestination.SetDataSource(AValue: IPAAudioSource);
@@ -996,6 +1029,7 @@ var
   Msg: TPAIOMessage;
   BufferMessage: TPABufferMessage absolute Msg;
 begin
+  MaskAudioFPExceptions;
   BeforeLoopCalled:=False;
   while not Terminated do
   begin
@@ -1108,6 +1142,7 @@ var
   BufferMessage: TPABufferMessage absolute Msg;
   lName: String;
 begin
+  MaskAudioFPExceptions;
   lName := ClassName;
   BeforeLoopCalled:=False;
   while not Terminated do
