@@ -174,6 +174,7 @@ type
     class function GetSize(AChannels: Integer): Integer;
     // main functions
     constructor Create(ASampleRate: Integer; AChannels: Integer; AMode: TOpusApplicationMode; out Error: Integer);
+    destructor Destroy; override;
     procedure Init(ASampleRate: Integer; AChannels: Integer; AMode: TOpusApplicationMode);
     function Encode(APCMData: pcint16; AFrameSize: Integer; AData: Pointer; AMaxDataBytes: Integer; out AEncodedSize: Integer): Boolean;
     function EncodeFloat(APCMData: pcfloat; AFrameSize: Integer; AData: Pointer; AMaxDataBytes: Integer; out AEncodedSize: Integer): Boolean;
@@ -339,6 +340,13 @@ constructor TOpusEncoder.Create(ASampleRate: Integer; AChannels: Integer;
 begin
   inherited Create;
   FOpus := TOpusLib.opus_encoder_create(ASampleRate, AChannels, ord(AMode), @Error);
+end;
+
+destructor TOpusEncoder.Destroy;
+begin
+  // release the libopus encoder state created in Create (mirrors TOpusDecoder).
+  TOpusLib.opus_encoder_destroy(FOpus);
+  inherited Destroy;
 end;
 
 procedure TOpusEncoder.Init(ASampleRate: Integer; AChannels: Integer;
