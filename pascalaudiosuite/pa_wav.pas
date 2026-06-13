@@ -192,6 +192,12 @@ begin
   FValid := (FWavFormat.ChunkHeader.ID = AUDIO_CHUNK_ID_fmt)
         and (FWavFormat.Format = AUDIO_FORMAT_PCM);
 
+  // We only read the 16 PCM bytes of the fmt body, but the chunk may be larger
+  // (e.g. an 18-byte fmt carrying a cbSize field). Skip the remainder, honoring
+  // RIFF word alignment, so the stream lands on the next chunk header.
+  if FValid and (FWavFormat.ChunkHeader.Size > 16) then
+    FStream.Seek((FWavFormat.ChunkHeader.Size - 16) + (FWavFormat.ChunkHeader.Size and 1), soCurrent);
+
   Channels:=FWavFormat.Channels;
   SamplesPerSecond:=FWavFormat.SampleRate;
   Format:=afS16;
