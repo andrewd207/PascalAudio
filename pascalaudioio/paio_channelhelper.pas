@@ -71,7 +71,10 @@ begin
   While ASamples > 0 do
   begin
     WCount := Min(BufSize-FPos[BufIndex], ASamples);
-    Move(AData[Written], FBuffers[BufIndex][0], WCount*SizeOf(Single));
+    // append at the channel's current fill cursor, not the buffer start --
+    // writing to [0] overwrote earlier data when a channel received more than
+    // one chunk before a flush (FPos was tracked but never used as the offset).
+    Move(AData[Written], FBuffers[BufIndex][FPos[BufIndex]], WCount*SizeOf(Single));
     Inc(Written, WCount);
     Dec(ASamples, WCount);
     Inc(FPos[BufIndex], WCount);

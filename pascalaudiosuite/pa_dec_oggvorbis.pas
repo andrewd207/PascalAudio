@@ -178,6 +178,11 @@ constructor TPAOggVorbisDecoderSource.Create(AStream: TStream; AOwnsStream: Bool
 begin
   inherited Create(AStream, AOwnsStream);
   Format:=afFloat32;
+  // Populate Channels/SamplesPerSecond from the header now. Otherwise they keep
+  // the defaults (2 / 44100) until the worker decodes the first buffer, so any
+  // downstream component that reads them before StartData (e.g. the noise
+  // removal link sizing its per-channel state) gets the wrong values.
+  InitValues;
 end;
 
 destructor TPAOggVorbisDecoderSource.Destroy;
@@ -193,13 +198,19 @@ end;
 procedure TPAOggVorbisDecoderSource.InitValues;
 var
   Tmp: TOggDecFloat;
+  StartPos: Int64;
 begin
+  StartPos := FStream.Position;
   Tmp := TOggDecFloat.TryCreate(FStream, False);
-  Channels:=Tmp.Info^.channels;
-  SamplesPerSecond:=Tmp.Info^.rate;
+  if Assigned(Tmp) then
+  begin
+    Channels:=Tmp.Info^.channels;
+    SamplesPerSecond:=Tmp.Info^.rate;
+    Tmp.Free;
+  end;
   Format:=afFloat32;
-  Tmp.Free;
-  FStream.Position:=0;
+  // rewind so the worker's decoder reads from where we started.
+  FStream.Position:=StartPos;
 end;
 
 procedure TPAOggVorbisDecoderSource.Play;

@@ -106,6 +106,11 @@ function TPANoiseRemovalLink.InternalProcessData(const AData; ACount: Int64; AIs
 var
   i: Integer;
 begin
+  // InitData (which creates FHelper and the per-channel removers) was only ever
+  // called from SetNoiseProfile, so processing without setting a noise profile
+  // dereferenced a nil FHelper and crashed. Ensure it runs here too.
+  if not FInited then
+    InitData;
   FHelper.Write(PSingle(@AData), ACount div SizeOf(Single));
   FIsLast:=AIsLastData;
   if FIsLast then
