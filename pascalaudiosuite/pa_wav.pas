@@ -244,6 +244,16 @@ begin
         OutOfChunks := not LoadNextChunk;
         if OutOfChunks then
           Break;
+        if FCurrentChunk.ID <> AUDIO_CHUNK_ID_data then
+        begin
+          // Skip the body of a non-data chunk (e.g. LIST/fact/PEAK, which most
+          // encoders -- including ffmpeg -- place between fmt and data). RIFF
+          // chunks are word-aligned, so account for the pad byte on odd sizes.
+          // Without this we read the chunk's body as if it were the next
+          // chunk header and misparse the whole file.
+          FStream.Seek(FCurrentChunk.Size + (FCurrentChunk.Size and 1), soCurrent);
+          FCurrentChunk.Size := 0;
+        end;
       until FCurrentChunk.ID = AUDIO_CHUNK_ID_data;
 
     RCount := FStream.Read(Buf[WSize], Min(SizeOf(Buf)-WSize, FCurrentChunk.Size));
