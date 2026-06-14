@@ -33,6 +33,11 @@ type
   TPAOggVorbisDecoderSource = class(TPAStreamSource, IPAPlayable, IPAStream)
   private
     FInited: Boolean;
+    // libvorbisfile's own ov_seekable() verdict, captured while opening on the
+    // main thread (InitValues) and refreshed by the worker (InitOgg). More
+    // accurate than the generic stream probe: a chained or live ogg can be
+    // stream-seekable yet report itself unseekable as a bitstream.
+    FLibSeekable: Boolean;
     Fogg: TOggDecFloat;
     function InitOgg: Boolean;
     procedure DeInitOgg;
@@ -98,6 +103,7 @@ begin
   end;
   Channels:=Fogg.Info^.channels;
   SamplesPerSecond:=FOgg.Info^.rate;
+  FLibSeekable:=Fogg.Seekable;
   Format:=afFloat32;
   FInited:=True;
   TPALog.Info(ClassName, 'initialized');
@@ -162,7 +168,9 @@ end;
 
 function TPAOggVorbisDecoderSource.CanSeek: Boolean;
 begin
-  Result := StreamCanSeek;
+  // ov_seekable already accounts for the stream's seek callback, so it supersedes
+  // the generic stream probe for vorbis.
+  Result := FLibSeekable;
 end;
 
 function TPAOggVorbisDecoderSource.GetPosition: Double;
@@ -230,6 +238,9 @@ begin
     begin
       Channels:=Tmp.Info^.channels;
       SamplesPerSecond:=Tmp.Info^.rate;
+      // Tmp is fully opened (TryCreate calls ov_test_open), so ov_seekable is
+      // valid here -- capture it before the worker has its own decoder.
+      FLibSeekable:=Tmp.Seekable;
     end
     else
       TPALog.Warning(ClassName, 'init failed: invalid or unsupported ogg/vorbis stream');

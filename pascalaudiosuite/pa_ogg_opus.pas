@@ -166,6 +166,9 @@ end;
 
 function TPAOggOpusDecoderSource.CanSeek: Boolean;
 begin
+  // The opus decoder is a custom (non-libopusfile) wrapper that implements seeking
+  // by repositioning the underlying stream (FindBestPageForSample/SetSamplePosition).
+  // There is no separate library seekable flag: it can seek iff the stream can.
   Result := StreamCanSeek;
 end;
 
