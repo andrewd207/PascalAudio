@@ -111,6 +111,10 @@
         <UnitName Value="mp4muxer"/>
       </Item>
       <Item>
+        <Filename Value="paio_faac.pas"/>
+        <UnitName Value="paio_faac"/>
+      </Item>
+      <Item>
         <Filename Value="mp4codec_mp4a.pas"/>
         <UnitName Value="mp4codec_mp4a"/>
       </Item>
