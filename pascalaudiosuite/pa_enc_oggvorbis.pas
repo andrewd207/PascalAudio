@@ -46,7 +46,6 @@ type
     procedure FinishEncode;
   protected
     function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; override;
-    procedure EndOfData; override;
     procedure BeforeStreamFree; override;
     procedure SetStream(AValue: TStream); override;
 
@@ -68,12 +67,24 @@ var
   Pkt: ogg_packet;
   PktComment: ogg_packet;
   PktCode: ogg_packet;
+  BaseQuality: cfloat;
 begin
   if FInited then
     Exit;
 
+  // vorbis_encode_setup_vbr wants a base_quality in -0.1..1.0. Quality is the
+  // 0..1 quality the caller asked for, so pass it straight through (clamped).
+  // The old code passed 1/Quality, which is out of range for any Quality < ~0.9
+  // and is +Inf when Quality is left at its 0 default -- that leaves FInfo's
+  // codec_setup half-built and later analysis reads garbage codebooks.
+  BaseQuality := Quality;
+  if BaseQuality < -0.1 then
+    BaseQuality := -0.1
+  else if BaseQuality > 1.0 then
+    BaseQuality := 1.0;
+
   vorbis_info_init(FInfo);
-  vorbis_encode_setup_vbr(FInfo, Channels, SamplesPerSecond, 1 / Quality);
+  vorbis_encode_setup_vbr(FInfo, Channels, SamplesPerSecond, BaseQuality);
   vorbis_encode_setup_init(FInfo);
   vorbis_analysis_init(FDSPState, FInfo);
   vorbis_block_init(FDSPState, FBlock);
@@ -121,13 +132,24 @@ var
   op: ogg_packet;
 begin
   //WriteLn('Finishing encode');
+  // tell vorbis there is no more input; the last block it hands back carries the
+  // end-of-stream marker.
   vorbis_analysis_wrote(FDSPState, 0);
+  // Drain through the SAME bitrate-managed path used while encoding
+  // (addblock/flushpacket). Using the raw vorbis_analysis(vb,&op) path here
+  // mixed the two APIs and left the final EOS packet stuck in the bitrate
+  // manager, so the stream was written without an EOS page -- valid audio, but
+  // tools that read the trailing granulepos (ffprobe's quick duration, seeking)
+  // saw garbage/zero length.
   while vorbis_analysis_blockout(FDSPState, FBlock) = 1 do
   begin
-    if Tvorbis_analysisHack(@vorbis_analysis)(FBlock, @op) = 0 then
+    Tvorbis_analysisHack(@vorbis_analysis)(FBlock, nil);
+    vorbis_bitrate_addblock(FBlock);
+    while vorbis_bitrate_flushpacket(FDSPState, op) > 0 do
       ogg_stream_packetin(FOggStream, op);
   end;
-  // Flush ogg data to Destinations
+  // Flush ogg data to Destinations (writes the EOS page since the last packetin
+  // carried e_o_s).
   WritePage(True);
 
   ogg_stream_clear(FOggStream);
@@ -177,14 +199,15 @@ begin
 
   end;
   WritePage(False or AIsLastData);
-  {if AIsLastData then
-    FinishEncode;}
-end;
-
-procedure TPAOggVorbisEncoderLink.EndOfData;
-begin
-  FinishEncode;
-  inherited EndOfData;
+  // Finish here, in the worker thread, when the source flags the last buffer.
+  // FinishEncode drives libvorbis (vorbis_analysis/FBlock) and writes the ogg
+  // pages; doing it from the EndOfData override instead ran it in the SOURCE's
+  // thread concurrently with this method in the destination worker, so two
+  // threads drove the same libvorbis/ogg state at once -> corrupt pages
+  // ("page after EOS", sequence gaps) and intermittent crashes inside
+  // vorbis_analysis.
+  if AIsLastData then
+    FinishEncode;
 end;
 
 procedure TPAOggVorbisEncoderLink.BeforeStreamFree;
@@ -199,17 +222,24 @@ end;
 procedure TPAOggVorbisEncoderLink.SetStream(AValue: TStream);
 begin
   inherited SetStream(AValue);
-  if Assigned(AValue) then
-  begin
+  // serial number and comment block are set up once in Create (the base ctor
+  // bypasses this override anyway); don't re-init here or a stream reassignment
+  // would leak/clear the existing vorbis_comment.
+  if Assigned(AValue) and (FSerialNumber = 0) then
     FSerialNumber:=1;
-    vorbis_comment_init(FComment);
-  end;
 end;
 
 constructor TPAOggVorbisEncoderLink.Create(AStream: TStream; AOwnsStream: Boolean);
 begin
   inherited Create(AStream, AOwnsStream);
   FFormat:=afRaw;
+  // TPAStreamDestination.Create assigns FStream directly and never calls the
+  // virtual SetStream, so do the encoder's stream-dependent setup here: a valid
+  // (non-zero) ogg serial number and an initialised comment block. Without this
+  // every stream was written with serial 0 and AddComment touched an
+  // uninitialised vorbis_comment.
+  FSerialNumber:=1;
+  vorbis_comment_init(FComment);
 end;
 
 function TPAOggVorbisEncoderLink.GetWrittenSeconds: QWord;
