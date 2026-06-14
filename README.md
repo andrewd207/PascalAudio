@@ -3,8 +3,8 @@
 Audio classes to decode and encode various formats including Ogg, Opus, Flac, 
 m4a made for use with the Free Pascal compiler. It's also possible to use other 
 external programs such as Sox, mpg321 or ffplay to decode any other format.
-It can currently output audio to the _MM_ system of windows or _PulseAudio_ for 
-linux.
+It can currently output audio to the _MM_ system of Windows or _PulseAudio_ for 
+Linux.
 
 Also there can be effects applied to the audio such as resampling via
 _libresample_ or _libsamplerate_. LADSPA2 plugins are also possible to 
@@ -22,10 +22,10 @@ this.
 ## PascalAudioSuite
 
 Using "Links" starting with a _Source_ link and ending with a _Destination_ 
-link it's possible to decode and audio file and convert/play it or using any 
-links. If the final link in the chan is PulseAudio then the decoded file will 
-play on the speakers. Each link in the chain operates inside it's own thread 
-and processes the data before handing off it's buffer to be handled by the next 
+link it's possible to decode an audio file and convert/play it using any 
+links. If the final link in the chain is PulseAudio then the decoded file will 
+play on the speakers. Each link in the chain operates inside its own thread 
+and processes the data before handing off its buffer to be handled by the next 
 link.
 
 To apply some effect to the decoded audio just insert some links into the 
