@@ -84,6 +84,7 @@ type
     FFrameSamples: Integer;          // S16 samples per encode call (1024*channels)
     FBuffer: array of SmallInt;      // accumulates a full frame across buffers
     FBufCount: Integer;
+    FTotalI16: Int64;                // total interleaved S16 samples fed in
     // metadata queued before the muxer exists (it is created lazily on first data).
     FTagNames: array of string;
     FTagVals: array of UTF8String;
@@ -483,6 +484,7 @@ begin
   // the muxer writes into our (destination-owned) stream, so it must NOT own it.
   FMuxer := TMP4Muxer.Create(FStream, False, SamplesPerSecond, Channels,
                              FEncoder.SamplesPerFrame, Asc);
+  FMuxer.EncoderDelay := FEncoder.Delay;
 
   // replay queued metadata.
   for i := 0 to High(FTagNames) do
@@ -523,6 +525,9 @@ begin
   while FEncoder.Encode(nil, 0, Frame) and (Length(Frame) > 0) do
     FMuxer.AddSample(Frame[0], Length(Frame));
 
+  // present exactly the audio we were given (trims priming + trailing padding).
+  if Channels > 0 then
+    FMuxer.ValidSamples := FTotalI16 div Channels;
   FMuxer.Finalize;
   FInited := False;
 end;
@@ -538,6 +543,7 @@ begin
   Result := ACount;
   Src := PSmallInt(@AData);
   n := ACount div SizeOf(SmallInt); // interleaved S16 sample count
+  Inc(FTotalI16, n);
 
   // accumulate into full encoder frames across buffer boundaries.
   i := 0;

@@ -94,6 +94,8 @@ type
     FMdatDataStart: Int64;         // file offset of the first sample (stco)
     FMaxBitrate: LongWord;
     FAvgBitrate: LongWord;
+    FEncoderDelay: LongWord;        // priming samples to skip (edit list media_time)
+    FValidSamples: QWord;           // exact presentation length; 0 = derive it
     FTags: array of TMP4Tag;
     FChapters: array of TMP4Chapter;
     FTextSizes: array of LongWord;  // chapter text sample sizes (in mdat)
@@ -142,6 +144,12 @@ type
     // optional bitrate hints written into the DecoderConfigDescriptor.
     property MaxBitrate: LongWord read FMaxBitrate write FMaxBitrate;
     property AvgBitrate: LongWord read FAvgBitrate write FAvgBitrate;
+    // Encoder priming (in media samples). When > 0 an edit list is written so the
+    // decoder skips the leading priming samples. Set before Finalize.
+    property EncoderDelay: LongWord read FEncoderDelay write FEncoderDelay;
+    // The exact number of valid samples per channel to present (trims the trailing
+    // frame padding too). 0 = present everything after the priming.
+    property ValidSamples: QWord read FValidSamples write FValidSamples;
   end;
 
 implementation
@@ -692,6 +700,7 @@ var
   Moov: TMemoryStream;
   pMoov, pTrak, pMdia, pMinf, pStbl, pStsd, pMp4a, pEsds: Int64;
   ascLen, dsiContent, dcdContent, esContent: LongWord;
+  segDur: QWord;
   i: Integer;
 begin
   ascLen := Length(FASC);
@@ -750,6 +759,25 @@ begin
         pStsd := BeginAtom(Moov, 'tref');
           pMp4a := BeginAtom(Moov, 'chap');
             PutU32(Moov, cChapterTrackID);
+          EndAtom(Moov, pMp4a);
+        EndAtom(Moov, pStsd);
+      end;
+
+      // edts/elst -> skip the encoder priming (and optionally trim trailing
+      // padding), so playback starts on the first real sample.
+      if (FEncoderDelay > 0) or (FValidSamples > 0) then
+      begin
+        if FValidSamples > 0 then
+          segDur := FValidSamples
+        else
+          segDur := TotalDuration - FEncoderDelay;
+        pStsd := BeginAtom(Moov, 'edts');
+          pMp4a := BeginAtom(Moov, 'elst');
+            PutU32(Moov, 0);                  // version/flags
+            PutU32(Moov, 1);                  // entry_count
+            PutU32(Moov, LongWord(segDur));   // segment_duration (movie timescale)
+            PutU32(Moov, FEncoderDelay);      // media_time = priming to skip
+            PutU16(Moov, 1); PutU16(Moov, 0); // media_rate 1.0
           EndAtom(Moov, pMp4a);
         EndAtom(Moov, pStsd);
       end;

@@ -128,6 +128,9 @@ type
     destructor Destroy; override;
     // The AAC frame length in PCM samples per channel (1024 for AAC-LC).
     function SamplesPerFrame: Integer;
+    // Encoder priming/lookahead in samples per channel. libfaac delays the signal
+    // by one full frame (1024 for AAC-LC); used to write the container edit list.
+    function Delay: Integer;
     // AudioSpecificConfig (DecoderSpecificInfo) for the container's esds.
     function GetAudioSpecificConfig: TBytes;
     // Encode interleaved S16. AInput points at ASampleCount int16 samples
@@ -265,6 +268,12 @@ begin
     Result := FInputSamples div culong(FChannels)
   else
     Result := 1024;
+end;
+
+function TFAACEncoder.Delay: Integer;
+begin
+  // libfaac's encoder delay is one frame.
+  Result := SamplesPerFrame;
 end;
 
 function TFAACEncoder.GetAudioSpecificConfig: TBytes;
