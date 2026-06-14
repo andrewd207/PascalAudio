@@ -91,6 +91,8 @@ begin
     WSize := Min(ASize, EOB);
     Move(PByte(@ASource)[WTotal], FMem[FWritePos], WSize);
     Inc(FWritePos, WSize);
+    Inc(WTotal, WSize); // advance through the source; without this a write that
+                        // wraps the ring re-copied from the start of ASource
     Dec(ASize, WSize);
 
     if FWritePos >= FTotalSpace then
@@ -117,6 +119,8 @@ begin
     Move(FMem[FReadPos], PByte(@ADest)[RTotal],RSize);
     Dec(ASize, RSize);
     Inc(FReadPos, RSize);
+    Inc(RTotal, RSize); // advance through the dest; without this a read that
+                        // wraps the ring overwrote the start of ADest
     if FReadPos >= FTotalSpace then
       FReadPos:=0;
   end;
