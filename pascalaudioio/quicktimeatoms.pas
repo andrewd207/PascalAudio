@@ -1066,7 +1066,8 @@ end;
 
 function TsttsAtom.FindSampleIndex(ASamplePos: Int64; out AOffset: Integer): Int64;
 var
-  lEntryCount, i, lEnd, lStart: Integer;
+  lEntryCount, i: Integer;
+  lEnd, lStart: Int64;
   lEntry: TEntry;
   lDiff: Int64;
 begin
@@ -1077,7 +1078,7 @@ begin
   begin
     lEntry := Item[i];
     lStart := lEnd;
-    lEnd := lEnd + (lEntry.ConsecutiveSamples * lEntry.SampleDuration);
+    lEnd := lEnd + (Int64(lEntry.ConsecutiveSamples) * lEntry.SampleDuration);
 
     if ASamplePos <= lEnd then
     begin
@@ -1093,7 +1094,8 @@ end;
 
 function TsttsAtom.FindSampleFromIndex(ASampleIndex: Int64): Int64;
 var
-  lEntryCount, i, lEnd, lStart: Integer;
+  lEntryCount, i: Integer;
+  lEnd, lStart: Int64;
   lEntry: TEntry;
   lDiff: Int64;
 begin
@@ -1108,11 +1110,11 @@ begin
     if ASampleIndex <= lEnd then
     begin
       lDiff := ASampleIndex - lStart;
-      Result += lEntry.SampleDuration * lDiff;
+      Result += Int64(lEntry.SampleDuration) * lDiff;
       Exit;
     end;
 
-    Result+= lEntry.ConsecutiveSamples * lEntry.SampleDuration;
+    Result+= Int64(lEntry.ConsecutiveSamples) * lEntry.SampleDuration;
   end;
 
 end;
@@ -1126,7 +1128,7 @@ begin
   for i := 0 to Count-1 do
   begin
     lEntry := Item[i];
-    Result += lEntry.ConsecutiveSamples * lEntry.SampleDuration;
+    Result += Int64(lEntry.ConsecutiveSamples) * lEntry.SampleDuration;
   end;
   TPALog.Debug('quicktimeatoms', 'Total Samples: %d', [Result]);
 end;
