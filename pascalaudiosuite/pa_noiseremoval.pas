@@ -18,7 +18,7 @@ unit pa_noiseremoval;
 interface
 
 uses
-  Classes, SysUtils, pa_base, audacity_noiseremoval, paio_channelhelper;
+  Classes, SysUtils, pa_base, audacity_noiseremoval, paio_channelhelper, paio_log;
 
 type
   { TPANoiseRemovalLink }
@@ -71,6 +71,7 @@ begin
     Exit;
 
   FInited := True;
+  TPALog.Info(ClassName, 'initialized');
   if Assigned(FHelper) then
     FreeAndNil(FHelper);
   FHelper := TPAIOChannelHelper.Create(Self);

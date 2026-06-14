@@ -62,6 +62,7 @@ var
   Info: IPAAudioInformation;
 begin
   FInited := True;
+  TPALog.Info(ClassName, 'initialized');
   Info := DataSource.GetSourceObject as IPAAudioInformation;
   // the base converts incoming data to Format (afFloat32, set in Create), so
   // tell PulseAudio we are feeding it float32.

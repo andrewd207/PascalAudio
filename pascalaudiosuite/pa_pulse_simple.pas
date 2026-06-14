@@ -53,6 +53,7 @@ var
   error: cint;
 begin
   FInited:=True;
+  TPALog.Info(ClassName, 'initialized');
   Info := DataSource.GetSourceObject as IPAAudioInformation;
   SS.Init;
   SS.Channels:=Info.Channels;

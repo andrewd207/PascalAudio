@@ -26,7 +26,8 @@ uses
   paio_messagequeue,
   quicktimecontainer,
   quicktimeatoms,
-  mp4codec;
+  mp4codec,
+  paio_log;
 
 type
 
@@ -131,6 +132,7 @@ begin
   if FInited then
     Exit;
   FInited:=True;
+  TPALog.Info(ClassName, 'initialized');
   FContainer := TQuicktimeContainer.Create(FStream, False);
   if not FContainer.IsValidFile then
   begin

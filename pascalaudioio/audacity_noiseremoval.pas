@@ -9,7 +9,7 @@ unit audacity_noiseremoval;
 interface
 
 uses
-  Classes, SysUtils, audacity_realfftf;
+  Classes, SysUtils, audacity_realfftf, paio_log;
 
 type
 
@@ -597,6 +597,7 @@ begin
   FSampleRate:=ASampleRate;
   Initialize;
   FInited:=True;
+  TPALog.Info(ClassName, 'initialized');
   Result := True;
   Reset;
 end;

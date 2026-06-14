@@ -24,7 +24,8 @@ uses
   pa_stream,
   paio_messagequeue,
   ctypes,
-  OggHfObject;
+  OggHfObject,
+  paio_log;
 
 type
   { TPAOggVorbisDecoderSource }
@@ -91,6 +92,7 @@ begin
   SamplesPerSecond:=FOgg.Info^.rate;
   Format:=afFloat32;
   FInited:=True;
+  TPALog.Info(ClassName, 'initialized');
   Result := True;
 end;
 

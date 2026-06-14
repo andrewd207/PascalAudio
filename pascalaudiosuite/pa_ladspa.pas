@@ -19,7 +19,7 @@ interface
 
 uses
   Classes, SysUtils,
-  pa_base, ladspa_classes;
+  pa_base, ladspa_classes, paio_log;
 
 type
 
@@ -46,6 +46,7 @@ implementation
 procedure TPALADSPALink.InitData;
 begin
   FInited:=True;
+  TPALog.Info(ClassName, 'initialized');
   FInstance.Reset; // starting new data stream
 end;
 

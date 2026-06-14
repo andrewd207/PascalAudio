@@ -95,6 +95,7 @@ begin
   SamplesPerSecond:=48000;
   Format:=afFloat32;
   FInited:=True;
+  TPALog.Info(ClassName, 'initialized');
   Result := True;
 end;
 

@@ -21,7 +21,8 @@ uses
   Classes, SysUtils,
   pa_base,
   lincd, cdrom,
-  discid
+  discid,
+  paio_log
   ;
 
 type
@@ -124,6 +125,7 @@ begin
   FFrameIndex:=FFirstFrame;
 
   FInited:=True;
+  TPALog.Info(ClassName, 'initialized');
 
   Channels:=2;
   Format:=afS16;

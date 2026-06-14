@@ -20,7 +20,7 @@ interface
 {$IFDEF UNIX}
 
 uses
-  Classes, SysUtils, unixtype, pa_base, resample;
+  Classes, SysUtils, unixtype, pa_base, resample, paio_log;
 
 type
 
@@ -52,6 +52,7 @@ uses
 procedure TPAResampleLink.InitData;
 begin
   FInited:=True;
+  TPALog.Info(ClassName, 'initialized');
   with (DataSource.GetSourceObject as IPAAudioInformation) do
   begin
     SourceSamplesPS:=SamplesPerSecond;

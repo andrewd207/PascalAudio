@@ -23,7 +23,7 @@ uses
   pa_stream,
   pa_register,
   ogg, vorbis,
-  ctypes;
+  ctypes, paio_log;
 
 type
 
@@ -97,6 +97,7 @@ begin
 
   WritePage(True);
   FInited:=True;
+  TPALog.Info(ClassName, 'initialized');
 end;
 
 procedure TPAOggVorbisEncoderLink.WritePage(ForceFlush: Boolean);

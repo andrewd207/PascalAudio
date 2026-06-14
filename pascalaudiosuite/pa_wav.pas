@@ -18,7 +18,7 @@ unit pa_wav;
 interface
 
 uses
-  Classes, SysUtils, pa_base, pa_stream, pa_register, fpwavformat;
+  Classes, SysUtils, pa_base, pa_stream, pa_register, fpwavformat, paio_log;
 
 type
 
@@ -97,6 +97,7 @@ var
   DataChunk: TChunkHeader;
 begin
   FInited := True;
+  TPALog.Info(ClassName, 'initialized');
 
   Riff.ChunkHeader.ID := AUDIO_CHUNK_ID_RIFF;
   Riff.Format := AUDIO_CHUNK_ID_WAVE;

@@ -66,6 +66,7 @@ var
 begin
   //WriteLn('Init data');
   FInited:=True;
+  TPALog.Info(ClassName, 'initialized');
   // libsamplerate resamples but never remaps channels: input and output must
   // have the same channel count. Adopt the source's channel count so the
   // converter, the frame math below, and the channel count we report

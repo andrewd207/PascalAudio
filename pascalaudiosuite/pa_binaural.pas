@@ -18,7 +18,7 @@ unit pa_binaural;
 interface
 
 uses
-  Classes, SysUtils, pa_base, bs2b;
+  Classes, SysUtils, pa_base, bs2b, paio_log;
 
 type
   { TPABinauralLink }
@@ -50,6 +50,7 @@ implementation
 procedure TPABinauralLink.InitData;
 begin
   FInited:=True; // otherwise InitData re-opens a new bs2bd every buffer (leak)
+  TPALog.Info(ClassName, 'initialized');
   FInstance:=Tbs2bd.Open;
   FInstance^.SampleRate:=SamplesPerSecond;
   FInstance^.Level:=Level;
