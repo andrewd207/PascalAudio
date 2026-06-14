@@ -53,6 +53,10 @@ implementation
 
 uses paio_opus;
 
+const
+  // largest opus frame: 120 ms at 48 kHz, in samples per channel.
+  OPUS_MAX_FRAME_SAMPLES = 5760;
+
 { TPAOggOpusDecoderSource }
 
 function TPAOggOpusDecoderSource.InitOpus: Boolean;
@@ -70,11 +74,18 @@ begin
     // invalid file
     FInited := False;
     FOpus := nil; // shouldn't be set...just to be clear
+    Exit;        // Result is already False; don't fall through and deref nil
   end;
   FOpus.InitDecoder;
   Channels:=FOpus.Channels;
 
-  SetLength(FBuffer, TOpusDecoder.GetSize(Channels));
+  // Size the PCM output buffer for the largest opus frame: 120 ms at 48 kHz =
+  // 5760 samples per channel. The old code used GetSize() -- the size of the
+  // opus *decoder struct* -- which is unrelated to the PCM buffer; it happens to
+  // be large enough for typical 20 ms packets but is too small for 60/120 ms
+  // frames, so opus_decode_float returned BUFFER_TOO_SMALL and the decode ended
+  // early on such files.
+  SetLength(FBuffer, OPUS_MAX_FRAME_SAMPLES * SizeOf(Single) * Channels);
 
   SamplesPerSecond:=48000;
   Format:=afFloat32;
@@ -103,7 +114,13 @@ begin
   Result := False;
   if not FInited then
     if not InitOpus then
+    begin
+      // couldn't initialise (e.g. invalid/garbage file): tell the destinations
+      // we're done so the pipeline shuts down instead of spinning forever
+      // waiting for data that will never arrive.
+      SignalDestinationsDone;
       Exit;
+    end;
 
   ReadSamples := FOpus.DecodePacket(@FBuffer[0], Length(FBuffer), True);
 
