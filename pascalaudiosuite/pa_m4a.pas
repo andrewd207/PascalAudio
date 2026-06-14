@@ -23,10 +23,12 @@ uses
   pa_register,
   pa_stream,
   paio_faad2,
+  paio_faac,
   paio_messagequeue,
   quicktimecontainer,
   quicktimeatoms,
   mp4codec,
+  mp4muxer,
   paio_log;
 
 type
@@ -67,8 +69,54 @@ type
     destructor Destroy; override;
   end;
 
+  { TPAAACEncoderLink -- encodes the pipeline's S16 audio to AAC (libfaac) and
+    writes it into an MP4/M4A container (TMP4Muxer), with metadata, cover art and
+    chapters. The output stream must be seekable (the muxer back-patches mdat and
+    appends moov at the end). }
+
+  TPAAACEncoderLink = class(TPAStreamDestination)
+  private
+    FEncoder: TFAACEncoder;
+    FMuxer: TMP4Muxer;
+    FInited: Boolean;
+    FQuality: LongWord;
+    FBitRate: LongWord;
+    FFrameSamples: Integer;          // S16 samples per encode call (1024*channels)
+    FBuffer: array of SmallInt;      // accumulates a full frame across buffers
+    FBufCount: Integer;
+    // metadata queued before the muxer exists (it is created lazily on first data).
+    FTagNames: array of string;
+    FTagVals: array of UTF8String;
+    FCover: TBytes;
+    FChapTimes: array of Double;
+    FChapTitles: array of UTF8String;
+    procedure InitEncoder;
+    procedure FinishEncode;
+    procedure EncodeAndMux(ASamples: PSmallInt; ACount: Integer);
+  protected
+    function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; override;
+    procedure BeforeStreamFree; override;
+  public
+    constructor Create(AStream: TStream; AOwnsStream: Boolean); override;
+    destructor  Destroy; override;
+    // Metadata / cover / chapters. Call before audio starts flowing.
+    procedure AddTextTag(const AFourCC: string; const AValue: UTF8String);
+    procedure SetTitle(const AValue: UTF8String);
+    procedure SetArtist(const AValue: UTF8String);
+    procedure SetAlbum(const AValue: UTF8String);
+    procedure SetComment(const AValue: UTF8String);
+    procedure AddCoverArt(const AData; ASize: Integer);
+    procedure AddChapter(ATimeSec: Double; const ATitle: UTF8String);
+    property  Quality: LongWord read FQuality write FQuality;  // VBR quality
+    property  BitRate: LongWord read FBitRate write FBitRate;  // per-channel; 0=VBR
+    property  Stream;
+  end;
+
 implementation
 uses MD5;
+
+const
+  cCopyrightSign = #$A9; // iTunes metadata tag prefix
 
 { TPAM4ADecoderSource }
 
@@ -357,8 +405,171 @@ begin
   inherited Destroy;
 end;
 
+{ TPAAACEncoderLink }
+
+constructor TPAAACEncoderLink.Create(AStream: TStream; AOwnsStream: Boolean);
+begin
+  inherited Create(AStream, AOwnsStream);
+  Format := afS16;       // libfaac is fed 16-bit interleaved PCM
+  FQuality := 100;       // libfaac default VBR quality
+  FBitRate := 0;
+end;
+
+destructor TPAAACEncoderLink.Destroy;
+begin
+  // inherited stops the worker and runs BeforeStreamFree (finishing the encode
+  // while FStream is alive) before the stream is freed.
+  inherited Destroy;
+  FMuxer.Free;
+  FEncoder.Free;
+end;
+
+procedure TPAAACEncoderLink.AddTextTag(const AFourCC: string; const AValue: UTF8String);
+begin
+  if Assigned(FMuxer) then
+    FMuxer.AddTextTag(AFourCC, AValue)
+  else
+  begin
+    SetLength(FTagNames, Length(FTagNames) + 1);
+    SetLength(FTagVals, Length(FTagVals) + 1);
+    FTagNames[High(FTagNames)] := AFourCC;
+    FTagVals[High(FTagVals)] := AValue;
+  end;
+end;
+
+procedure TPAAACEncoderLink.SetTitle(const AValue: UTF8String);   begin AddTextTag(cCopyrightSign+'nam', AValue); end;
+procedure TPAAACEncoderLink.SetArtist(const AValue: UTF8String);  begin AddTextTag(cCopyrightSign+'ART', AValue); end;
+procedure TPAAACEncoderLink.SetAlbum(const AValue: UTF8String);   begin AddTextTag(cCopyrightSign+'alb', AValue); end;
+procedure TPAAACEncoderLink.SetComment(const AValue: UTF8String); begin AddTextTag(cCopyrightSign+'cmt', AValue); end;
+
+procedure TPAAACEncoderLink.AddCoverArt(const AData; ASize: Integer);
+begin
+  if Assigned(FMuxer) then
+    FMuxer.AddCoverArt(AData, ASize)
+  else if ASize > 0 then
+  begin
+    SetLength(FCover, ASize);
+    Move(AData, FCover[0], ASize);
+  end;
+end;
+
+procedure TPAAACEncoderLink.AddChapter(ATimeSec: Double; const ATitle: UTF8String);
+begin
+  if Assigned(FMuxer) then
+    FMuxer.AddChapter(ATimeSec, ATitle)
+  else
+  begin
+    SetLength(FChapTimes, Length(FChapTimes) + 1);
+    SetLength(FChapTitles, Length(FChapTitles) + 1);
+    FChapTimes[High(FChapTimes)] := ATimeSec;
+    FChapTitles[High(FChapTitles)] := ATitle;
+  end;
+end;
+
+procedure TPAAACEncoderLink.InitEncoder;
+var
+  Asc: TBytes;
+  i: Integer;
+begin
+  if FInited then
+    Exit;
+  FInited := True;
+
+  FEncoder := TFAACEncoder.Create(SamplesPerSecond, Channels);
+  FEncoder.Quality := FQuality;
+  FEncoder.BitRate := FBitRate;
+  Asc := FEncoder.GetAudioSpecificConfig;
+
+  // the muxer writes into our (destination-owned) stream, so it must NOT own it.
+  FMuxer := TMP4Muxer.Create(FStream, False, SamplesPerSecond, Channels,
+                             FEncoder.SamplesPerFrame, Asc);
+
+  // replay queued metadata.
+  for i := 0 to High(FTagNames) do
+    FMuxer.AddTextTag(FTagNames[i], FTagVals[i]);
+  if Length(FCover) > 0 then
+    FMuxer.AddCoverArt(FCover[0], Length(FCover));
+  for i := 0 to High(FChapTimes) do
+    FMuxer.AddChapter(FChapTimes[i], FChapTitles[i]);
+
+  FFrameSamples := FEncoder.InputSampleCount;
+  SetLength(FBuffer, FFrameSamples);
+  FBufCount := 0;
+
+  TPALog.Info(ClassName, 'initialized');
+end;
+
+procedure TPAAACEncoderLink.EncodeAndMux(ASamples: PSmallInt; ACount: Integer);
+var
+  Frame: TBytes;
+begin
+  if FEncoder.Encode(ASamples, ACount, Frame) and (Length(Frame) > 0) then
+    FMuxer.AddSample(Frame[0], Length(Frame));
+end;
+
+procedure TPAAACEncoderLink.FinishEncode;
+var
+  Frame: TBytes;
+begin
+  if not FInited then
+    Exit;
+
+  // encode whatever partial frame remains, then drain the encoder's lookahead.
+  if FBufCount > 0 then
+  begin
+    EncodeAndMux(@FBuffer[0], FBufCount);
+    FBufCount := 0;
+  end;
+  while FEncoder.Encode(nil, 0, Frame) and (Length(Frame) > 0) do
+    FMuxer.AddSample(Frame[0], Length(Frame));
+
+  FMuxer.Finalize;
+  FInited := False;
+end;
+
+function TPAAACEncoderLink.InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64;
+var
+  Src: PSmallInt;
+  n, i, take: Integer;
+begin
+  if not FInited then
+    InitEncoder;
+
+  Result := ACount;
+  Src := PSmallInt(@AData);
+  n := ACount div SizeOf(SmallInt); // interleaved S16 sample count
+
+  // accumulate into full encoder frames across buffer boundaries.
+  i := 0;
+  while i < n do
+  begin
+    take := FFrameSamples - FBufCount;
+    if take > n - i then
+      take := n - i;
+    Move(Src[i], FBuffer[FBufCount], take * SizeOf(SmallInt));
+    Inc(FBufCount, take);
+    Inc(i, take);
+    if FBufCount = FFrameSamples then
+    begin
+      EncodeAndMux(@FBuffer[0], FFrameSamples);
+      FBufCount := 0;
+    end;
+  end;
+
+  if AIsLastData then
+    FinishEncode;
+end;
+
+procedure TPAAACEncoderLink.BeforeStreamFree;
+begin
+  // finish even if the last-data flag never arrived, while FStream is still valid.
+  if FInited then
+    FinishEncode;
+end;
+
 initialization
   PARegister(partDecoder, TPAM4ADecoderSource, 'MP4audio', '.m4a', 'ftyp', 4, 4); // ftyp is at 4 offset
+  PARegister(partEncoder, TPAAACEncoderLink, 'MP4audio', '.m4a', 'ftyp', 4, 4);
 
 end.
 
