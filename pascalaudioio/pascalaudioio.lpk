@@ -107,6 +107,10 @@
         <UnitName Value="mp4codec"/>
       </Item>
       <Item>
+        <Filename Value="mp4muxer.pas"/>
+        <UnitName Value="mp4muxer"/>
+      </Item>
+      <Item>
         <Filename Value="mp4codec_mp4a.pas"/>
         <UnitName Value="mp4codec_mp4a"/>
       </Item>
