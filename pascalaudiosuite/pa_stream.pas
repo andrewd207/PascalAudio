@@ -249,6 +249,10 @@ end;
 constructor TPAStreamDestination.Create(AStream: TStream; AOwnsStream: Boolean);
 begin
   FStream := AStream;
+  // honor the ownership flag: without this FOwnsStream stayed False, so the
+  // destructor never freed/closed the output stream -- the encoded file was
+  // flushed but the stream object and its file handle leaked.
+  FOwnsStream := AOwnsStream;
   inherited Create;
   Format := afRaw;
 end;
