@@ -18,22 +18,45 @@ unit pa_wav;
 interface
 
 uses
-  Classes, SysUtils, pa_base, pa_stream, pa_register, fpwavformat, paio_log;
+  Classes, SysUtils, pa_base, pa_stream, pa_register, paio_messagequeue,
+  fpwavformat, paio_log;
 
 type
 
   { TPAWavSource }
 
-  TPAWavSource = class(TPAStreamSource, IPAStream)
+  TPAWavSource = class(TPAStreamSource, IPAPlayable, IPAStream)
   private
     FWavFormat: TWaveFormat;
     FValid: Boolean;
     FCurrentChunk: TChunkHeader;
+    // Location of the PCM data chunk, established in ReadHeader, used for seeking
+    // and position reporting. FDataPos is the byte offset within the data chunk
+    // of the next sample to read; it is only written from the worker thread.
+    FDataStart: Int64;
+    FDataSize: Int64;
+    FDataPos: Int64;
+    FBlockAlign: Integer;
+    FBytesPerSecond: Integer;
     procedure ReadHeader;
     function LoadNextChunk: Boolean;
+    function FindDataChunk: Boolean;
   protected
     procedure SetStream(AValue: TStream); override;
     function InternalOutputToDestination: Boolean; override;
+    function HandleMessage(var AMsg: TPAIOMessage): Boolean; override;
+    // IPAPlayable
+    function  CanSeek: Boolean;
+    function  GetPosition: Double;
+    procedure SetPosition(AValue: Double);
+    function  GetMaxPosition: Double;
+  public
+    // IPAPlayable
+    procedure Play;
+    procedure Pause;
+    procedure Stop;
+    property  Position: Double read GetPosition write SetPosition;
+    property  MaxPosition: Double read GetMaxPosition;
   end;
 
   TPAWavDest = class(TPAStreamDestination, IPAStream)
@@ -216,7 +239,43 @@ begin
   Channels:=FWavFormat.Channels;
   SamplesPerSecond:=FWavFormat.SampleRate;
   Format:=afS16;
+
+  // Cache the frame geometry so seeking/position can convert between seconds and
+  // byte offsets. BlockAlign = bytes per frame; ByteRate = bytes per second.
+  FBlockAlign := (FWavFormat.BitsPerSample * FWavFormat.Channels) div 8;
+  FBytesPerSecond := FWavFormat.SampleRate * FBlockAlign;
+
+  // Locate the data chunk now (rather than lazily in InternalOutputToDestination)
+  // so MaxPosition is known and seeks have a fixed reference point.
+  FDataStart := 0;
+  FDataSize := 0;
+  FDataPos := 0;
+  FillChar(FCurrentChunk, SizeOf(FCurrentChunk), 0);
+  if not FindDataChunk then
+    TPALog.Warning(ClassName, 'no data chunk found');
+
   TPALog.Info(ClassName, 'initialized');
+end;
+
+function TPAWavSource.FindDataChunk: Boolean;
+begin
+  // Scan forward from the current position (just past the fmt chunk) skipping
+  // any non-data chunks (LIST/fact/PEAK, etc.) until the data chunk is reached.
+  // On success the stream is left positioned at the start of the PCM body and
+  // FCurrentChunk/FDataStart/FDataSize describe it.
+  Result := False;
+  while LoadNextChunk do
+  begin
+    if FCurrentChunk.ID = AUDIO_CHUNK_ID_data then
+    begin
+      FDataStart := FStream.Position;
+      FDataSize := FCurrentChunk.Size;
+      Result := True;
+      Exit;
+    end;
+    // Skip the body; RIFF chunks are word-aligned so pad odd sizes.
+    FStream.Seek(FCurrentChunk.Size + (FCurrentChunk.Size and 1), soCurrent);
+  end;
 end;
 
 function TPAWavSource.LoadNextChunk: Boolean;
@@ -301,6 +360,10 @@ begin
 
   Result := FStream.Position < FStream.Size;
 
+  // Track how far into the data chunk we are (clamped) for position reporting.
+  if FDataSize > 0 then
+    FDataPos := Min(Max(FStream.Position - FDataStart, Int64(0)), FDataSize);
+
   if WSize > 0 then
     WriteToBuffer(Buf, WSize, not Result);
 
@@ -309,6 +372,74 @@ begin
   // decoder sources all signal here too).
   if not Result then
     SignalDestinationsDone;
+end;
+
+function TPAWavSource.HandleMessage(var AMsg: TPAIOMessage): Boolean;
+var
+  lByte: Int64;
+begin
+  Result := True;
+  case AMsg.Message of
+    PAM_Seek:
+      if FValid and (FBytesPerSecond > 0) then
+      begin
+        // seconds -> byte offset in the data chunk, snapped down to a frame
+        // boundary and clamped to the chunk extent.
+        lByte := Trunc(Double(AMsg.Data) * FBytesPerSecond);
+        if lByte < 0 then
+          lByte := 0;
+        if lByte > FDataSize then
+          lByte := FDataSize;
+        lByte := lByte - (lByte mod FBlockAlign);
+        FStream.Position := FDataStart + lByte;
+        FCurrentChunk.ID := AUDIO_CHUNK_ID_data;
+        FCurrentChunk.Size := FDataSize - lByte;
+        FDataPos := lByte;
+      end;
+  else
+    Result := False;
+  end;
+end;
+
+function TPAWavSource.CanSeek: Boolean;
+begin
+  Result := FValid and (FBytesPerSecond > 0) and (FDataSize > 0);
+end;
+
+function TPAWavSource.GetPosition: Double;
+begin
+  if (not FValid) or (FBytesPerSecond = 0) then
+    Exit(0);
+  Result := FDataPos / FBytesPerSecond;
+end;
+
+procedure TPAWavSource.SetPosition(AValue: Double);
+begin
+  if not CanSeek then
+    Exit;
+  FMsgQueue.PostMessage(PAM_Seek, AValue);
+end;
+
+function TPAWavSource.GetMaxPosition: Double;
+begin
+  if (not FValid) or (FBytesPerSecond = 0) then
+    Exit(0);
+  Result := FDataSize / FBytesPerSecond;
+end;
+
+procedure TPAWavSource.Play;
+begin
+
+end;
+
+procedure TPAWavSource.Pause;
+begin
+
+end;
+
+procedure TPAWavSource.Stop;
+begin
+
 end;
 
 initialization
