@@ -50,11 +50,21 @@ type
     // TPALog is static; instantiating it is a programming error.
     constructor Create;
 
-    class procedure Log(ALevel: TPALogLevel; const ASource, AMessage: String); static;
-    class procedure Debug  (const ASource, AMessage: String); static;
-    class procedure Info   (const ASource, AMessage: String); static;
-    class procedure Warning(const ASource, AMessage: String); static;
-    class procedure Error  (const ASource, AMessage: String); static;
+    // Each method comes in two forms: a plain one that logs the message text
+    // verbatim, and a Format one taking an "array of const" -- Pascal can't
+    // give an open array a default value, so this is an overload rather than a
+    // defaulted parameter. The plain form does NOT run Format, so it is safe
+    // for arbitrary text containing stray '%'.
+    class procedure Log(ALevel: TPALogLevel; const ASource, AMessage: String); static; overload;
+    class procedure Log(ALevel: TPALogLevel; const ASource, AFmt: String; const AArgs: array of const); static; overload;
+    class procedure Debug  (const ASource, AMessage: String); static; overload;
+    class procedure Debug  (const ASource, AFmt: String; const AArgs: array of const); static; overload;
+    class procedure Info   (const ASource, AMessage: String); static; overload;
+    class procedure Info   (const ASource, AFmt: String; const AArgs: array of const); static; overload;
+    class procedure Warning(const ASource, AMessage: String); static; overload;
+    class procedure Warning(const ASource, AFmt: String; const AArgs: array of const); static; overload;
+    class procedure Error  (const ASource, AMessage: String); static; overload;
+    class procedure Error  (const ASource, AFmt: String; const AArgs: array of const); static; overload;
 
     // Messages below this level are dropped. Defaults to llInfo.
     class property MinLevel: TPALogLevel read GetMinLevel write SetMinLevel;
@@ -146,9 +156,29 @@ begin
   end;
 end;
 
+class procedure TPALog.Log(ALevel: TPALogLevel; const ASource, AFmt: String; const AArgs: array of const);
+var
+  S: String;
+begin
+  // A logging call must never throw, so a malformed format string is caught and
+  // surfaced rather than propagated to the caller.
+  try
+    S := Format(AFmt, AArgs);
+  except
+    on E: Exception do
+      S := AFmt + ' [log format error: ' + E.Message + ']';
+  end;
+  Log(ALevel, ASource, S);
+end;
+
 class procedure TPALog.Debug(const ASource, AMessage: String);
 begin
   Log(llDebug, ASource, AMessage);
+end;
+
+class procedure TPALog.Debug(const ASource, AFmt: String; const AArgs: array of const);
+begin
+  Log(llDebug, ASource, AFmt, AArgs);
 end;
 
 class procedure TPALog.Info(const ASource, AMessage: String);
@@ -156,14 +186,29 @@ begin
   Log(llInfo, ASource, AMessage);
 end;
 
+class procedure TPALog.Info(const ASource, AFmt: String; const AArgs: array of const);
+begin
+  Log(llInfo, ASource, AFmt, AArgs);
+end;
+
 class procedure TPALog.Warning(const ASource, AMessage: String);
 begin
   Log(llWarning, ASource, AMessage);
 end;
 
+class procedure TPALog.Warning(const ASource, AFmt: String; const AArgs: array of const);
+begin
+  Log(llWarning, ASource, AFmt, AArgs);
+end;
+
 class procedure TPALog.Error(const ASource, AMessage: String);
 begin
   Log(llError, ASource, AMessage);
+end;
+
+class procedure TPALog.Error(const ASource, AFmt: String; const AArgs: array of const);
+begin
+  Log(llError, ASource, AFmt, AArgs);
 end;
 
 initialization
