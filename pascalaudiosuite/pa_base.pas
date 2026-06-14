@@ -132,9 +132,18 @@ type
   TPABufferEvent = class(TSimpleEvent)
   private
     FIsSet: Boolean;
+    // dedicated lock guarding FIsSet together with its paired underlying
+    // Set/ResetEvent syscall. SetEvent and ResetEvent run on different threads
+    // (producer vs consumer); without this the cached FIsSet flag could be read
+    // stale, skipping the real signal -> a missed wakeup (up to a WaitFor
+    // timeout of latency, or a dropped buffer). It is intentionally a separate
+    // critical section so it can never block on the pool/manager locks.
+    FCrit: TRTLCriticalSection;
   public
     Buffer: PAudioBuffer;
     OwnerDestroyed: Boolean; // means buffer pool should free the event
+    constructor Create;
+    destructor Destroy; override;
     procedure SetEvent;
     procedure ResetEvent;
     function IsSet: Boolean;
@@ -493,25 +502,52 @@ end;
 
 { TPABufferEvent }
 
+constructor TPABufferEvent.Create;
+begin
+  inherited Create;
+  InitCriticalSection(FCrit);
+end;
+
+destructor TPABufferEvent.Destroy;
+begin
+  DoneCriticalSection(FCrit);
+  inherited Destroy;
+end;
+
 procedure TPABufferEvent.SetEvent;
 begin
-  if FIsSet then
-    Exit;
-  (SELF as TSimpleEvent).SetEvent;
-  FIsSet:=True;
+  EnterCriticalSection(FCrit);
+  try
+    if FIsSet then
+      Exit;
+    inherited SetEvent;
+    FIsSet:=True;
+  finally
+    LeaveCriticalSection(FCrit);
+  end;
 end;
 
 procedure TPABufferEvent.ResetEvent;
 begin
-  if not FIsSet then
-    Exit;
-  FIsSet:=False;
-  (SELF as TSimpleEvent).ResetEvent;
+  EnterCriticalSection(FCrit);
+  try
+    if not FIsSet then
+      Exit;
+    FIsSet:=False;
+    inherited ResetEvent;
+  finally
+    LeaveCriticalSection(FCrit);
+  end;
 end;
 
 function TPABufferEvent.IsSet: Boolean;
 begin
-  Result := FIsSet;
+  EnterCriticalSection(FCrit);
+  try
+    Result := FIsSet;
+  finally
+    LeaveCriticalSection(FCrit);
+  end;
 end;
 
 { TPABufferPool }
