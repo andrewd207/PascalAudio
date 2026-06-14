@@ -166,7 +166,7 @@ end;
 
 function TPAOggOpusDecoderSource.CanSeek: Boolean;
 begin
-  Result := True;
+  Result := StreamCanSeek;
 end;
 
 function TPAOggOpusDecoderSource.GetPosition: Double;
@@ -181,6 +181,11 @@ procedure TPAOggOpusDecoderSource.SetPosition(AValue: Double);
 begin
   if not FInited then
     Exit;
+  if not CanSeek then
+  begin
+    LogSeekRefused;
+    Exit;
+  end;
   FMsgQueue.PostMessage(PAM_Seek, Trunc(AValue*SamplesPerSecond));
 end;
 

@@ -319,6 +319,11 @@ procedure TPAM4ADecoderSource.SetPosition(AValue: Double);
 begin
   if not FInited then
     Exit;
+  if not CanSeek then
+  begin
+    LogSeekRefused;
+    Exit;
+  end;
 
   FMsgQueue.PostMessage(PAM_Seek, AValue);
 end;
@@ -334,7 +339,7 @@ end;
 
 function TPAM4ADecoderSource.CanSeek: Boolean;
 begin
-  Result := True;
+  Result := StreamCanSeek;
 end;
 
 constructor TPAM4ADecoderSource.Create(AStream: TStream; AOwnsStream: Boolean);

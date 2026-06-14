@@ -138,7 +138,7 @@ end;
 
 function TPAFlacSource.CanSeek: Boolean;
 begin
-  Result := True;
+  Result := StreamCanSeek;
 end;
 
 function TPAFlacSource.GetPosition: Double;
@@ -150,6 +150,11 @@ end;
 
 procedure TPAFlacSource.SetPosition(AValue: Double);
 begin
+  if not CanSeek then
+  begin
+    LogSeekRefused;
+    Exit;
+  end;
   FMsgQueue.PostMessage(PAM_Seek, AValue);
 end;
 

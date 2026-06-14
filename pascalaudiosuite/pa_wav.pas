@@ -400,7 +400,7 @@ end;
 
 function TPAWavSource.CanSeek: Boolean;
 begin
-  Result := FValid and (FBytesPerSecond > 0) and (FDataSize > 0);
+  Result := FValid and (FBytesPerSecond > 0) and (FDataSize > 0) and StreamCanSeek;
 end;
 
 function TPAWavSource.GetPosition: Double;
@@ -413,7 +413,10 @@ end;
 procedure TPAWavSource.SetPosition(AValue: Double);
 begin
   if not CanSeek then
+  begin
+    LogSeekRefused;
     Exit;
+  end;
   FMsgQueue.PostMessage(PAM_Seek, AValue);
 end;
 

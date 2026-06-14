@@ -18,7 +18,7 @@ unit pa_stream;
 interface
 
 uses
-  Classes, SysUtils, pa_base;
+  Classes, SysUtils, pa_base, paio_log;
 
 type
 
@@ -29,6 +29,7 @@ type
   protected
     FStream: TStream;
     FOwnsStream: Boolean;
+    FStreamSeekable: Boolean;
     procedure SetStream(AValue: TStream); virtual;
     function GetStream: TStream; virtual;
   private
@@ -37,6 +38,12 @@ type
 
   protected
     function InternalOutputToDestination: Boolean; override;
+    // True if the underlying stream supports repositioning. Seek-capable codecs
+    // should fold this into their CanSeek so a non-seekable stream (a pipe, a live
+    // feed) is reported honestly. Probed once when the stream is assigned.
+    function StreamCanSeek: Boolean;
+    // Emit a uniform warning when a seek is asked of a source that cannot seek.
+    procedure LogSeekRefused;
   public
     constructor Create; override; // you must set ownsstream and stream
     constructor Create(AStream: TStream; AOwnsStream: Boolean = True); virtual;
@@ -95,10 +102,36 @@ begin
 end;
 
 procedure TPAStreamSource.SetStream(AValue: TStream);
+var
+  Cur: Int64;
 begin
   if Assigned(FStream) and (AValue <> FStream) and FOwnsStream then
     FreeAndNil(FStream);
   FStream := AValue;
+
+  // Probe seekability once, here, while the worker is still idle (probing later
+  // would race the worker's reads). Best-effort: a seekable stream lets us read
+  // and restore its position; a non-seekable one (pipe/socket) raises or fails.
+  FStreamSeekable := False;
+  if Assigned(FStream) then
+    try
+      Cur := FStream.Position;
+      FStream.Position := FStream.Size; // a real seek to end...
+      FStream.Position := Cur;          // ...then restore where we were.
+      FStreamSeekable := True;
+    except
+      FStreamSeekable := False;
+    end;
+end;
+
+function TPAStreamSource.StreamCanSeek: Boolean;
+begin
+  Result := FStreamSeekable;
+end;
+
+procedure TPAStreamSource.LogSeekRefused;
+begin
+  TPALog.Warning(ClassName, 'seek requested on a non-seekable stream; ignoring');
 end;
 
 function TPAStreamSource.InternalOutputToDestination: Boolean;
@@ -167,7 +200,9 @@ begin
   // Rewind to the start, but only if this source actually supports seeking; a
   // non-seekable source (a pipe, a live stream) simply stops where it is.
   if Supports(Self, IPAPlayable, Playable) and Playable.CanSeek then
-    Playable.SetPosition(0);
+    Playable.SetPosition(0)
+  else
+    TPALog.Debug(ClassName, 'stop: stream is not seekable, staying at current position');
 end;
 
 { TPAStreamDestination }

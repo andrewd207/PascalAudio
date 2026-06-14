@@ -162,7 +162,7 @@ end;
 
 function TPAOggVorbisDecoderSource.CanSeek: Boolean;
 begin
-  Result := True;
+  Result := StreamCanSeek;
 end;
 
 function TPAOggVorbisDecoderSource.GetPosition: Double;
@@ -177,6 +177,11 @@ procedure TPAOggVorbisDecoderSource.SetPosition(AValue: Double);
 begin
   if not FInited then
     Exit;
+  if not CanSeek then
+  begin
+    LogSeekRefused;
+    Exit;
+  end;
 
   FMsgQueue.PostMessage(PAM_Seek, AValue);
 end;
