@@ -23,7 +23,7 @@ unit flac_classes;
 interface
 
 uses
-  Classes, SysUtils, ctypes, md5, paio_log;
+  Classes, SysUtils, TypInfo, ctypes, md5, paio_log;
 
 {$DEFINE FLAC_INTF_TYPES}
   {$i flac_format.inc}
@@ -190,6 +190,9 @@ type
     FDoLooseMidSideStereo: Boolean;
     FDoMidSideStereo: Boolean;
     FEncoder: Pointer;  // PFlacStreamEncoderStruct
+    FStream: TStream;          // output the encoded FLAC is written to
+    FCommentObj: Pointer; // PFlacStreamMetadataStruct -- VORBIS_COMMENT block, built lazily
+    FInited: Boolean;
     FOggSerialNumber: LongWord;
     FStreamableSubset: Boolean;
     FVerify: Boolean;
@@ -235,15 +238,24 @@ type
     class procedure ClassProgressHandler(Encoder: Pointer; bytes_written, samples_Written: QWord; frames_written, total_frames_estimate: cunsigned; userdata: Pointer); cdecl; static;
     class function  OfObjectToAddr(Method: TMethod): Pointer; static;
   protected
-    function  ReadHandler(Buffer: PByte; Bytes: PtrUInt): TFlacStreamEncoderReadStatus; virtual; abstract;
-    function  WriteHandler(Buffer: PByte; Bytes: PtrUInt; Samples, CurrentFrame: LongWord): TFlacStreamEncoderWriteStatus; virtual; abstract;
-    function  SeekHandler(AbsByteOffset: QWord): TFlacStreamEncoderSeekStatus; virtual; abstract;
-    function  TellHandler(AbsByteOffset: PQWord): TFlacStreamEncoderTellStatus; virtual; abstract;
-    procedure MetadataHandler(Metadata: Pointer); virtual; abstract;
-    procedure ProgressHandler(BytesWritten, SamplesWritten: QWord; FramesWritten, TotalFramesEstimate: LongWord); virtual; abstract;
+    // Default implementations drive the output TStream (FStream). They stay
+    // virtual so a subclass (e.g. an ogg-FLAC variant) can override.
+    function  ReadHandler(Buffer: PByte; Bytes: PtrUInt): TFlacStreamEncoderReadStatus; virtual;
+    function  WriteHandler(Buffer: PByte; Bytes: PtrUInt; Samples, CurrentFrame: LongWord): TFlacStreamEncoderWriteStatus; virtual;
+    function  SeekHandler(AbsByteOffset: QWord): TFlacStreamEncoderSeekStatus; virtual;
+    function  TellHandler(AbsByteOffset: PQWord): TFlacStreamEncoderTellStatus; virtual;
+    procedure MetadataHandler(Metadata: Pointer); virtual;
+    procedure ProgressHandler(BytesWritten, SamplesWritten: QWord; FramesWritten, TotalFramesEstimate: LongWord); virtual;
   public
-    constructor Create;
+    // AStream receives the encoded FLAC. Set the format properties (Channels,
+    // BitsPerSample, SampleRate) and any metadata via AddVorbisComment, THEN call
+    // Init -- libFLAC locks those in at init_stream and they cannot change after.
+    constructor Create(AStream: TStream);
     destructor  Destroy; override;
+    procedure AddVorbisComment(const AName, AValue: String);
+    function  Init: Boolean;
+    function  ProcessInterleaved(ABuffer: PLongint; ASamples: Integer): Boolean;
+    function  Finish: Boolean;
 
     property    OggSerialNumber: LongWord read FOggSerialNumber write SetOggSerialNumber;
     property    Verify: Boolean read FVerify write SetVerify;
@@ -981,22 +993,128 @@ begin
   Result := Method.Code;
 end;
 
-constructor TFlacStreamEncoder.Create;
+constructor TFlacStreamEncoder.Create(AStream: TStream);
 begin
-  FEncoder:=FLAC__stream_encoder_new;
-  FLAC__stream_encoder_init_stream(FEncoder,
+  // Only allocate the encoder here. init_stream must happen AFTER the caller sets
+  // the format and metadata, so it lives in Init -- the previous version inited in
+  // the constructor, which locked the format at defaults and made the encoder and
+  // its metadata API unusable.
+  FStream := AStream;
+  FEncoder := FLAC__stream_encoder_new;
+  FCommentObj := nil;
+  FInited := False;
+end;
+
+destructor TFlacStreamEncoder.Destroy;
+begin
+  // the encoder does not own the metadata blocks; free our VORBIS_COMMENT here.
+  if Assigned(FCommentObj) then
+    FLAC__metadata_object_delete(FCommentObj);
+  FLAC__stream_encoder_delete(FEncoder);
+  inherited Destroy;
+end;
+
+procedure TFlacStreamEncoder.AddVorbisComment(const AName, AValue: String);
+var
+  Entry: TFlacStreamMetadataVorbisCommentEntryStruct;
+begin
+  // metadata must be in place before Init; appending after has no effect.
+  if FInited then
+  begin
+    TPALog.Warning(ClassName, 'AddVorbisComment after Init has no effect; ignoring "' + AName + '"');
+    Exit;
+  end;
+  if not Assigned(FCommentObj) then
+    FCommentObj := FLAC__metadata_object_new(fmtVorbisComment);
+  if not Assigned(FCommentObj) then
+  begin
+    TPALog.Error(ClassName, 'could not allocate VORBIS_COMMENT metadata block');
+    Exit;
+  end;
+  if FLAC__metadata_object_vorbiscomment_entry_from_name_value_pair(@Entry, PChar(AName), PChar(AValue)) then
+    // entry passed by value; copy := False transfers ownership of Entry.Entry to
+    // the block, so it is freed by FLAC__metadata_object_delete and never leaks.
+    FLAC__metadata_object_vorbiscomment_append_comment(FCommentObj, Entry, False)
+  else
+    TPALog.Warning(ClassName, 'rejected metadata tag "' + AName + '"');
+end;
+
+function TFlacStreamEncoder.Init: Boolean;
+begin
+  if FInited then
+    Exit(True);
+  if Assigned(FCommentObj) then
+    FLAC__stream_encoder_set_metadata(FEncoder, PPFlacStreamMetadataStruct(@FCommentObj), 1);
+  Result := FLAC__stream_encoder_init_stream(FEncoder,
      TFlacStreamEncoderWriteCallback(@TFlacStreamEncoder.ClassWriteHandler),
      TFlacStreamEncoderSeekCallback(@TFlacStreamEncoder.ClassSeekHandler),
      TFlacStreamEncoderTellCallback(@TFlacStreamEncoder.ClassTellHandler),
      TFlacStreamEncoderMetadataCallback(@TFlacStreamEncoder.ClassMetadataHandler),
      Self
-    );
+    ) = seisOK;
+  FInited := Result;
+  if not Result then
+    TPALog.Error(ClassName, 'init_stream failed: ' + GetEnumName(TypeInfo(TFlacStreamEncoderState), Ord(State)));
 end;
 
-destructor TFlacStreamEncoder.Destroy;
+function TFlacStreamEncoder.ProcessInterleaved(ABuffer: PLongint; ASamples: Integer): Boolean;
 begin
-  FLAC__stream_encoder_delete(FEncoder);
-  inherited Destroy;
+  Result := FLAC__stream_encoder_process_interleaved(FEncoder, ABuffer, ASamples);
+  if not Result then
+    TPALog.Error(ClassName, 'process_interleaved failed: ' + GetEnumName(TypeInfo(TFlacStreamEncoderState), Ord(State)));
+end;
+
+function TFlacStreamEncoder.Finish: Boolean;
+begin
+  Result := FLAC__stream_encoder_finish(FEncoder);
+  FInited := False;
+end;
+
+function TFlacStreamEncoder.ReadHandler(Buffer: PByte; Bytes: PtrUInt): TFlacStreamEncoderReadStatus;
+begin
+  // the native stream encoder never reads; only the ogg variant would.
+  Result := sersUnsupported;
+end;
+
+function TFlacStreamEncoder.WriteHandler(Buffer: PByte; Bytes: PtrUInt; Samples, CurrentFrame: LongWord): TFlacStreamEncoderWriteStatus;
+begin
+  if FStream.Write(Buffer^, Bytes) = LongInt(Bytes) then
+    Result := sewsOk
+  else
+    Result := sewsFatalError;
+end;
+
+function TFlacStreamEncoder.SeekHandler(AbsByteOffset: QWord): TFlacStreamEncoderSeekStatus;
+begin
+  // libFLAC seeks back at Finish to patch STREAMINFO. A non-seekable output
+  // (pipe) reports unsupported, and libFLAC leaves the streaminfo as written.
+  try
+    FStream.Seek(Int64(AbsByteOffset), soBeginning);
+    Result := sessOk;
+  except
+    Result := sessUnsupported;
+  end;
+end;
+
+function TFlacStreamEncoder.TellHandler(AbsByteOffset: PQWord): TFlacStreamEncoderTellStatus;
+begin
+  try
+    AbsByteOffset^ := FStream.Position;
+    Result := setsOk;
+  except
+    Result := setsUnsupported;
+  end;
+end;
+
+procedure TFlacStreamEncoder.MetadataHandler(Metadata: Pointer);
+begin
+  // STREAMINFO is rewritten through the seek/write callbacks at Finish; nothing
+  // to do here.
+end;
+
+procedure TFlacStreamEncoder.ProgressHandler(BytesWritten, SamplesWritten: QWord; FramesWritten, TotalFramesEstimate: LongWord);
+begin
+  // no-op default.
 end;
 
 { TFlacStreamDecoder }

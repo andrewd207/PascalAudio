@@ -167,7 +167,11 @@ function  FLAC__metadata_object_vorbiscomment_set_vendor_string(obj: PFlacStream
 function  FLAC__metadata_object_vorbiscomment_resize_comments(obj: PFlacStreamMetadataStruct; new_num_comments: cunsigned): TFlacbool; cdecl; external;
 function  FLAC__metadata_object_vorbiscomment_set_comment(obj: PFlacStreamMetadataStruct; comment_num: cunsigned; entry: PFlacStreamMetadataVorbisCommentEntryStruct; copy: TFlacBool): TFlacbool; cdecl; external;
 function  FLAC__metadata_object_vorbiscomment_insert_comment(obj: PFlacStreamMetadataStruct; comment_num: cunsigned; entry: PFlacStreamMetadataVorbisCommentEntryStruct; copy: TFlacBool): TFlacbool; cdecl; external;
-function  FLAC__metadata_object_vorbiscomment_append_comment(obj: PFlacStreamMetadataStruct; entry: PFlacStreamMetadataVorbisCommentEntryStruct; copy: TFlacBool): TFlacbool; cdecl; external;
+// NOTE: libFLAC passes the entry struct BY VALUE here (not by pointer); the
+// original pointer declaration made libFLAC read the pointer itself as the
+// {length,entry} struct -> crash. The sibling set/insert/replace_comment and
+// set_vendor_string have the same by-value entry and would need the same fix.
+function  FLAC__metadata_object_vorbiscomment_append_comment(obj: PFlacStreamMetadataStruct; entry: TFlacStreamMetadataVorbisCommentEntryStruct; copy: TFlacBool): TFlacbool; cdecl; external;
 function  FLAC__metadata_object_vorbiscomment_replace_comment(obj: PFlacStreamMetadataStruct;  entry: PFlacStreamMetadataVorbisCommentEntryStruct; all: TFlacBool; copy: TFlacBool): TFlacbool; cdecl; external;
 function  FLAC__metadata_object_vorbiscomment_delete_comment(obj: PFlacStreamMetadataStruct; comment_num: cunsigned): TFlacbool; cdecl; external;
 function  FLAC__metadata_object_vorbiscomment_entry_from_name_value_pair(entry: PFlacStreamMetadataVorbisCommentEntryStruct; field_name, field_value: PChar): TFlacbool; cdecl; external;

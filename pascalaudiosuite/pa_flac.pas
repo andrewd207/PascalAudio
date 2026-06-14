@@ -18,7 +18,7 @@ unit pa_flac;
 interface
 
 uses
-  Classes, SysUtils, pa_base, flac_classes, pa_register, pa_stream, paio_messagequeue;
+  Classes, SysUtils, pa_base, flac_classes, pa_register, pa_stream, paio_messagequeue, paio_log;
 
 type
 
@@ -46,6 +46,31 @@ type
     property  Position: Double read GetPosition write SetPosition;
     property  MaxPosition: Double read GetMaxPosition;
     property Stream;
+  end;
+
+  { TPAFlacEncoderLink }
+
+  TPAFlacEncoderLink = class(TPAStreamDestination)
+  private
+    FEnc: TFlacStreamEncoder;
+    FInited: Boolean;
+    FCompressionLevel: Integer;
+    FInt32Buf: array of LongInt; // reusable S16 -> int32 conversion buffer
+    procedure InitEncoder;
+    procedure FinishEncode;
+  protected
+    function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; override;
+    procedure BeforeStreamFree; override;
+  public
+    constructor Create(AStream: TStream; AOwnsStream: Boolean); override;
+    destructor  Destroy; override;
+    // Add a VORBIS_COMMENT tag (e.g. AddComment('TITLE','Song')). Must be called
+    // before the first audio buffer arrives -- libFLAC locks metadata in when the
+    // encoder is initialised on the first InternalProcessData (same window as the
+    // ogg/vorbis encoder's AddComment).
+    procedure AddComment(const TagName, Content: String);
+    property  CompressionLevel: Integer read FCompressionLevel write FCompressionLevel;
+    property  Stream;
   end;
 
 implementation
@@ -185,7 +210,96 @@ begin
   end;
 end;
 
+{ TPAFlacEncoderLink }
+
+constructor TPAFlacEncoderLink.Create(AStream: TStream; AOwnsStream: Boolean);
+begin
+  inherited Create(AStream, AOwnsStream);
+  // FLAC encodes integer PCM; take 16-bit interleaved from the pipeline.
+  Format := afS16;
+  FCompressionLevel := 5;
+  // TPAStreamDestination.Create assigns FStream directly, so it is valid now; the
+  // encoder writes its output there. Format/metadata are set later in InitEncoder,
+  // once the DataSource has supplied Channels/SamplesPerSecond, and after any
+  // AddComment calls.
+  FEnc := TFlacStreamEncoder.Create(FStream);
+end;
+
+destructor TPAFlacEncoderLink.Destroy;
+begin
+  // inherited stops the worker and runs BeforeStreamFree (which finishes the
+  // encode while FStream is still alive) before the stream is freed.
+  inherited Destroy;
+  FEnc.Free;
+end;
+
+procedure TPAFlacEncoderLink.AddComment(const TagName, Content: String);
+begin
+  FEnc.AddVorbisComment(TagName, Content);
+end;
+
+procedure TPAFlacEncoderLink.InitEncoder;
+begin
+  if FInited then
+    Exit;
+  FInited := True;
+  FEnc.Channels := Channels;
+  FEnc.BitsPerSample := 16;
+  FEnc.SampleRate := SamplesPerSecond;
+  FEnc.CompressionLevel := FCompressionLevel;
+  if FEnc.Init then
+    TPALog.Info(ClassName, 'initialized')
+  else
+    TPALog.Error(ClassName, 'failed to start FLAC encoder');
+end;
+
+procedure TPAFlacEncoderLink.FinishEncode;
+begin
+  if not FInited then
+    Exit;
+  FEnc.Finish;
+  FInited := False;
+end;
+
+function TPAFlacEncoderLink.InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64;
+var
+  Frames, Total, i: Integer;
+  Src: PSmallInt;
+begin
+  if not FInited then
+    InitEncoder;
+
+  Result := ACount;
+
+  // FLAC wants one FLAC__int32 per sample (sign-extended), interleaved by frame.
+  Frames := ACount div (BytesPerSample(afS16) * Channels);
+  Total  := Frames * Channels;
+  if Total > 0 then
+  begin
+    if Length(FInt32Buf) < Total then
+      SetLength(FInt32Buf, Total);
+    Src := PSmallInt(@AData);
+    for i := 0 to Total-1 do
+      FInt32Buf[i] := Src[i]; // S16 -> int32, sign-extended
+    FEnc.ProcessInterleaved(@FInt32Buf[0], Frames);
+  end;
+
+  // finish in the worker thread when the source flags the last buffer, mirroring
+  // the ogg encoder (doing it from EndOfData would race the worker).
+  if AIsLastData then
+    FinishEncode;
+end;
+
+procedure TPAFlacEncoderLink.BeforeStreamFree;
+begin
+  // flush + patch STREAMINFO even if the last-data flag never arrived (e.g. the
+  // encode was interrupted), while FStream is still valid.
+  if FInited then
+    FinishEncode;
+end;
+
 initialization
   PARegister(partDecoder, TPAFlacSource, 'FLAC', '.flac', 'fLaC', 4);
+  PARegister(partEncoder, TPAFlacEncoderLink, 'FLAC', '.flac', 'fLaC', 4);
 end.
 
