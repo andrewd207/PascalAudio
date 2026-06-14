@@ -220,7 +220,12 @@ var
 begin
   Result := CreateTest(AStream, IsOk);
   if Not IsOk then
-    FreeAndNil(Result)
+  begin
+    FreeAndNil(Result);
+    // CreateTest no longer frees the stream; honor ownership here on failure.
+    if AOwnsStream then
+      AStream.Free;
+  end
   else
   begin
      Result.FinishCreate;
@@ -242,7 +247,12 @@ var
 begin
   CreateTest(AFile, IsOk);
   if not IsOk then
+  begin
+    // CreateTest no longer frees the stream; honor ownership before raising.
+    if AOwnsStream then
+      AFile.Free;
     Raise Exception.Create('invalid ogg file');
+  end;
   FinishCreate;
   FOwnsStream := AOwnsStream;
 end;
@@ -268,7 +278,10 @@ begin
   begin
     Fopen := False;
     ov_clear(FOgg);
-    FStream.Free;
+    // Do NOT free FStream here. CreateTest doesn't own it -- ownership is decided
+    // by the caller via FOwnsStream, which isn't set yet. Freeing it freed a
+    // caller-owned stream, causing a use-after-free (e.g. InitValues touching
+    // FStream.Position right after a failed TryCreate). The owning caller frees.
   end
   else
     FOpen := True;
