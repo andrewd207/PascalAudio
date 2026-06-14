@@ -132,10 +132,10 @@ begin
   if FInited then
     Exit;
   FInited:=True;
-  TPALog.Info(ClassName, 'initialized');
   FContainer := TQuicktimeContainer.Create(FStream, False);
   if not FContainer.IsValidFile then
   begin
+    TPALog.Warning(ClassName, 'init failed: not a valid m4a/mp4 file');
     DeInitAudio;
     Exit;
   end;
@@ -157,6 +157,7 @@ begin
   // bail out (rather than dereference nil) if the sample description is missing.
   if (lstsdAtom = nil) or (lstsdAtom.Atoms.Count = 0) then
   begin
+    TPALog.Warning(ClassName, 'init failed: missing sample description (stsd)');
     DeInitAudio;
     Exit;
   end;
@@ -164,6 +165,7 @@ begin
   lmp4aAtom := TSoundSampleDecriptionAtom(lstsdAtom.Atoms.Atom[0]);
   if lmp4aAtom = nil then
   begin
+    TPALog.Warning(ClassName, 'init failed: missing audio sample description');
     DeInitAudio;
     Exit;
   end;
@@ -174,6 +176,7 @@ begin
   lesds := TesdsAtom(lmp4aAtom.Atoms.FindAtom('esds'));
   if lesds = nil then
   begin
+    TPALog.Warning(ClassName, 'init failed: missing decoder config (esds)');
     DeInitAudio;
     Exit;
   end;
@@ -188,7 +191,7 @@ begin
   FDecoder.AudioSpecificConfig(lesds.DecoderConfigData, lesds.DecoderConfigLength, @lmp4ASC);
   Channels:=FDecoder.Channels;
   SamplesPerSecond:=FDecoder.SampleRate;
-
+  TPALog.Info(ClassName, 'initialized');
 end;
 
 procedure TPAM4ADecoderSource.DeInitAudio;

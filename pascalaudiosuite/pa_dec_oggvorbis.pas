@@ -82,12 +82,24 @@ function TPAOggVorbisDecoderSource.InitOgg: Boolean;
 begin
   Result := False;
   if FStream = nil then
+  begin
+    TPALog.Warning(ClassName, 'init failed: no stream');
     Exit;
+  end;
 
   if FInited then
     Exit;
 
   Fogg := TOggDecFloat.TryCreate(FStream, False);
+  // TryCreate returns nil on a non-ogg/unsupported stream, and Info can be nil
+  // even on a non-nil decoder for a malformed one; dereferencing Fogg.Info below
+  // would crash, so bail out with a message instead.
+  if (Fogg = nil) or (Fogg.Info = nil) then
+  begin
+    TPALog.Warning(ClassName, 'init failed: invalid or unsupported ogg/vorbis stream');
+    FreeAndNil(Fogg);
+    Exit;
+  end;
   Channels:=Fogg.Info^.channels;
   SamplesPerSecond:=FOgg.Info^.rate;
   Format:=afFloat32;
@@ -114,7 +126,12 @@ begin
   Result := False;
   if not FInited then
     if not InitOgg then
+    begin
+      // init failed (bad file): tell the destinations we're done so the pipeline
+      // shuts down instead of the destination worker hanging on EndOfData.
+      SignalDestinationsDone;
       Exit;
+    end;
 
   ReadSamples := FOgg.ReadFloat(ChannelData, AUDIO_BUFFER_FLOAT_SAMPLES div FChannels, @BitStream);
 
@@ -206,8 +223,15 @@ begin
   Tmp := TOggDecFloat.TryCreate(FStream, False);
   if Assigned(Tmp) then
   begin
-    Channels:=Tmp.Info^.channels;
-    SamplesPerSecond:=Tmp.Info^.rate;
+    // Info can be nil even on a non-nil decoder for a malformed stream;
+    // dereferencing it would crash, so only read it when present.
+    if Tmp.Info <> nil then
+    begin
+      Channels:=Tmp.Info^.channels;
+      SamplesPerSecond:=Tmp.Info^.rate;
+    end
+    else
+      TPALog.Warning(ClassName, 'init failed: invalid or unsupported ogg/vorbis stream');
     Tmp.Free;
   end;
   Format:=afFloat32;

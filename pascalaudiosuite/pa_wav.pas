@@ -178,20 +178,34 @@ begin
   FValid := False;
 
   if not Assigned(FStream) then
+  begin
+    TPALog.Warning(ClassName, 'init failed: no stream');
     Exit;
+  end;
   FStream.Seek(0, soBeginning);
   RCount := FStream.Read(Riff, SizeOf(Riff));
   if RCount <> SizeOf(Riff) then
+  begin
+    TPALog.Warning(ClassName, 'init failed: stream too short for RIFF header');
     Exit;
+  end;
   Riff.ChunkHeader.Size:=LEtoN(Riff.ChunkHeader.Size);
   FValid := (Riff.ChunkHeader.ID = AUDIO_CHUNK_ID_RIFF)
         and (Riff.Format = AUDIO_CHUNK_ID_WAVE);
   if not FValid then
+  begin
+    TPALog.Warning(ClassName, 'init failed: not a RIFF/WAVE file');
     Exit;
+  end;
   FStream.Read(FWavFormat, SizeOf(FWavFormat));
   LEtoN(FWavFormat);
   FValid := (FWavFormat.ChunkHeader.ID = AUDIO_CHUNK_ID_fmt)
         and (FWavFormat.Format = AUDIO_FORMAT_PCM);
+  if not FValid then
+  begin
+    TPALog.Warning(ClassName, 'init failed: missing or non-PCM fmt chunk');
+    Exit;
+  end;
 
   // We only read the 16 PCM bytes of the fmt body, but the chunk may be larger
   // (e.g. an 18-byte fmt carrying a cbSize field). Skip the remainder, honoring
@@ -202,6 +216,7 @@ begin
   Channels:=FWavFormat.Channels;
   SamplesPerSecond:=FWavFormat.SampleRate;
   Format:=afS16;
+  TPALog.Info(ClassName, 'initialized');
 end;
 
 function TPAWavSource.LoadNextChunk: Boolean;

@@ -64,7 +64,10 @@ function TPAOggOpusDecoderSource.InitOpus: Boolean;
 begin
   Result := False;
   if FStream = nil then
+  begin
+    TPALog.Warning(ClassName, 'init failed: no stream');
     Exit;
+  end;
 
   if FInited then
     Exit;

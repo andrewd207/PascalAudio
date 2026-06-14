@@ -88,14 +88,23 @@ begin
 
   // check if device not set or device doesn't exist
   if not ((FDevice <> '') and FileExists(FDevice)) then
+  begin
+    TPALog.Warning(ClassName, 'init failed: device not set or not found: ' + FDevice);
     Exit;
+  end;
 
   FHandle := FpOpen(FDevice, Open_RdOnly or Open_NonBlock);
   if FHandle < 0 then
+  begin
+    TPALog.Warning(ClassName, 'init failed: cannot open device: ' + FDevice);
     Exit;
+  end;
 
   if FpIOCtl(FHandle, CDROMREADTOCHDR, @TocHeader)<>0 then
+  begin
+    TPALog.Warning(ClassName, 'init failed: cannot read CD table of contents');
     Exit;
+  end;
 
   if TocHeader.cdth_trk1-TocHeader.cdth_trk0 > 0 then
   begin
