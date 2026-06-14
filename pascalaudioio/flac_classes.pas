@@ -23,7 +23,7 @@ unit flac_classes;
 interface
 
 uses
-  Classes, ctypes, md5;
+  Classes, SysUtils, ctypes, md5, paio_log;
 
 {$DEFINE FLAC_INTF_TYPES}
   {$i flac_format.inc}
@@ -640,7 +640,11 @@ begin
     Stream.Free;
     Result := 0;
   except
-    Result := -1;
+    on E: Exception do
+    begin
+      TPALog.Debug('TFlacMetadataChain', 'stream close failed: ' + E.Message);
+      Result := -1;
+    end;
   end;
 
 end;
@@ -1028,7 +1032,11 @@ begin
     else
       Result := fsdrsEndOfStream;
   except
-    Result := fsdrsReadAbort;
+    on E: Exception do
+    begin
+      TPALog.Debug('TFlacStreamDecoder', 'stream read failed: ' + E.Message);
+      Result := fsdrsReadAbort;
+    end;
   end;
 end;
 
@@ -1041,9 +1049,15 @@ begin
     Result := fsdssOk;
   except
     on e: EStreamError do
+    begin
+      TPALog.Debug('TFlacStreamDecoder', 'seek unsupported (non-seekable stream): ' + e.Message);
       Result := fsdssUnsupported;
+    end
     else
+    begin
+      TPALog.Debug('TFlacStreamDecoder', 'seek failed: ' + (ExceptObject as Exception).Message);
       Result := fsdssError;
+    end;
   end;
 end;
 
@@ -1056,9 +1070,15 @@ begin
     Result := fsdtsOK;
   except
     on e: EStreamError do
+    begin
+      TPALog.Debug('TFlacStreamDecoder', 'tell unsupported (non-seekable stream): ' + e.Message);
       Result := fsdtsUnsupported;
+    end
     else
+    begin
+      TPALog.Debug('TFlacStreamDecoder', 'tell failed: ' + (ExceptObject as Exception).Message);
       Result := fsdtsError;
+    end;
   end;
 end;
 
@@ -1071,9 +1091,15 @@ begin
     Result := fsdlsOk;
   except
     on e: EStreamError do
+    begin
+      TPALog.Debug('TFlacStreamDecoder', 'length unsupported (non-seekable stream): ' + e.Message);
       Result := fsdlsUnsupported;
+    end
     else
+    begin
+      TPALog.Debug('TFlacStreamDecoder', 'length failed: ' + (ExceptObject as Exception).Message);
       Result := fsdlsError;
+    end;
   end;
 end;
 
@@ -1099,7 +1125,11 @@ begin
     else
       Result := fsdwsAbort;
   except
-    Result := fsdwsAbort;
+    on E: Exception do
+    begin
+      TPALog.Debug('TFlacStreamDecoder', 'write callback failed: ' + E.Message);
+      Result := fsdwsAbort;
+    end;
   end;
 end;
 

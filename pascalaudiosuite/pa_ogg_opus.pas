@@ -10,6 +10,7 @@ uses
   pa_register,
   pa_stream,
   paio_messagequeue,
+  paio_log,
   paio_ogg_opus;
 type
 
@@ -71,10 +72,14 @@ begin
   try
     FOpus := TOggOpusDecoder.Create(FStream);
   except
-    // invalid file
-    FInited := False;
-    FOpus := nil; // shouldn't be set...just to be clear
-    Exit;        // Result is already False; don't fall through and deref nil
+    on E: Exception do
+    begin
+      // invalid file
+      TPALog.Warning('TPAOggOpusDecoderSource', 'failed to open opus stream: ' + E.Message);
+      FInited := False;
+      FOpus := nil; // shouldn't be set...just to be clear
+      Exit;        // Result is already False; don't fall through and deref nil
+    end;
   end;
   FOpus.InitDecoder;
   Channels:=FOpus.Channels;
