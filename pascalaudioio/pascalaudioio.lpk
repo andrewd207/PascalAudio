@@ -47,6 +47,10 @@
         <UnitName Value="flac_classes"/>
       </Item>
       <Item>
+        <Filename Value="paio_log.pas"/>
+        <UnitName Value="paio_log"/>
+      </Item>
+      <Item>
         <Filename Value="paio_types.pas"/>
         <UnitName Value="paio_types"/>
       </Item>

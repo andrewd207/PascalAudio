@@ -19,7 +19,7 @@ unit pa_base;
 interface
 
 uses
-  Classes, SysUtils, syncobjs, pa_lists, paio_types, paio_messagequeue, fgl;
+  Classes, SysUtils, syncobjs, pa_lists, paio_types, paio_messagequeue, paio_log, fgl;
 
 const
   AUDIO_BUFFER_SIZE  = paio_types.AUDIO_BUFFER_SIZE;
@@ -849,7 +849,7 @@ begin
                 except
                   on E: Exception do
                   begin
-                    WriteLn(ClassName+' Exception: '+E.Message);
+                    TPALog.Error(ClassName, E.Message);
                   end;
                 end;
                 // if a conversion has occured then free the allocated data.
@@ -877,7 +877,7 @@ begin
     except
       on E: Exception do
       begin
-        WriteLn(ClassName+' Exception: '+E.Message);
+        TPALog.Error(ClassName, E.Message);
       end;
     end;
   end;
@@ -996,7 +996,7 @@ begin
    except
      on E: Exception do
      begin
-       WriteLn(ClassName+' Exception: '+E.Message);
+       TPALog.Error(ClassName, E.Message);
      end;
    end;
 
@@ -1126,7 +1126,7 @@ begin
     except
       on E: Exception do
       begin
-        WriteLn(ClassName+' Exception: '+E.Message);
+        TPALog.Error(ClassName, E.Message);
         Synchronize(@RaiseE);
       end;
     end;
@@ -1250,7 +1250,7 @@ begin
     except
       on E: Exception do
       begin
-        WriteLn(ClassName+' Exception: '+E.Message);
+        TPALog.Error(ClassName, E.Message);
         Synchronize(@RaiseE);
       end;
     end;
