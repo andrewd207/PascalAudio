@@ -872,7 +872,7 @@ begin
       end
       else
         if Res <> wrTimeout then
-          WriteLn(ClassName,' waitfor = ', Res);
+          TPALog.Warning(ClassName, 'unexpected WaitMessage result: %d', [Ord(Res)]);
 
     except
       on E: Exception do

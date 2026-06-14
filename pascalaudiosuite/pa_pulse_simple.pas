@@ -18,7 +18,7 @@ unit pa_pulse_simple;
 interface
 {$IFDEF USEPULSE}
 uses
-  Classes, SysUtils, pa_base, pa_register, pulse_simple;
+  Classes, SysUtils, pa_base, pa_register, pulse_simple, paio_log;
 
 
 type
@@ -64,7 +64,7 @@ begin
 
   FPulse:=TPASimple.New(nil,PChar(ParamStr(0)),sdPLAYBACK, nil, 'test', @SS, nil, nil, @error);
   if error < 0 then
-    WriteLn('Error initing pulse data ',pa_strerror(error));
+    TPALog.Error('pa_pulse_simple', 'init failed: ' + pa_strerror(error));
 end;
 
 procedure TPAPulseDestination.DeInit;
@@ -87,7 +87,7 @@ begin
   //WriteLn('Writing to pulse');
   FPulse^.Write(@AData, ACount, @error);
   if error < 0 then
-    WriteLn('Error Writin pulse data ',pa_strerror(error));
+    TPALog.Error('pa_pulse_simple', 'write failed: ' + pa_strerror(error));
   if AIsLastData then
     DeInit;
 end;

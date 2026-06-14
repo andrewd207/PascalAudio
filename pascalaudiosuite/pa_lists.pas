@@ -18,7 +18,7 @@ unit pa_lists;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, paio_log;
 
 type
   PPAFifoItem = ^TPAFifoItem;
@@ -66,7 +66,7 @@ var
 begin
   if AItem = nil then
   begin
-    WriteLn('Added nil item to list!');
+    TPALog.Warning('TPAFifoList', 'Added nil item to list!');
     Exit;
   end;
   New(Tmp);

@@ -27,7 +27,7 @@ interface
 {$IFDEF USEPULSE}
 
 uses
-  Classes, SysUtils, pa_base, paio_pulse;
+  Classes, SysUtils, pa_base, paio_pulse, paio_log;
 
 type
 
@@ -67,7 +67,7 @@ begin
   // tell PulseAudio we are feeding it float32.
   FStream := TPulseAsyncStream.Create('PascalAudio', Info.SamplesPerSecond, Info.Channels, sfFloat32LE);
   if not FStream.Open then
-    WriteLn(StdErr, 'pa_pulse: async open failed: ', FStream.LastError);
+    TPALog.Error('pa_pulse', 'async open failed: ' + FStream.LastError);
 end;
 
 procedure TPAPulseAsyncDestination.DeInit;

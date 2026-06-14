@@ -42,7 +42,7 @@ unit paio_faad2;
 interface
 
 uses
-  Classes, SysUtils, dynlibs;
+  Classes, SysUtils, dynlibs, paio_log;
 
 const
   FAAD2_VERSION  = '2.7';
@@ -396,14 +396,9 @@ end;
 procedure TAACDecoder.PrintConfig(AValue: PNeAACDecConfiguration);
 begin
   with AValue^ do
-  begin
-    WriteLn('defObjectType: ',defObjectType);
-    WriteLn('defSampleRate: ', defSampleRate);
-    WriteLn('outputFormat: ', outputFormat);
-    WriteLn('downMatrix: ', downMatrix);
-    WriteLn('useOldADTSFormat: ', useOldADTSFormat);
-    WriteLn('dontUpSampleImplicitSBR: ', dontUpSampleImplicitSBR);
-  end;
+    TPALog.Debug('TAACDecoder',
+      'config: defObjectType=%d defSampleRate=%d outputFormat=%d downMatrix=%d useOldADTSFormat=%d dontUpSampleImplicitSBR=%d',
+      [defObjectType, defSampleRate, outputFormat, downMatrix, useOldADTSFormat, dontUpSampleImplicitSBR]);
 end;
 
 class function TAACDecoder.GetErroMessage(AError: Byte): String;

@@ -18,7 +18,7 @@ unit pa_process;
 interface
 
 uses
-  Classes, SysUtils, pa_base, process;
+  Classes, SysUtils, pa_base, process, paio_log;
 
 type
 
@@ -78,7 +78,7 @@ begin
     if RCount > SizeOf(Buf) then
       RCount := SizeOf(Buf);
     FProcess.Stderr.Read(Buf, RCount);
-    Write(StdErr,Copy(PChar(@Buf),0,RCount));
+    TPALog.Debug(ClassName, Copy(PChar(@Buf),0,RCount));
   end;
 
   if FProcess.Running or (FProcess.Output.NumBytesAvailable > 0) then

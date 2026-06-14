@@ -20,7 +20,7 @@ unit quicktimeatoms;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, paio_log;
 
 type
 
@@ -1128,7 +1128,7 @@ begin
     lEntry := Item[i];
     Result += lEntry.ConsecutiveSamples * lEntry.SampleDuration;
   end;
-  WriteLn('Total Samples: ', Result);
+  TPALog.Debug('quicktimeatoms', 'Total Samples: %d', [Result]);
 end;
 
   { TAtomList }
@@ -1253,9 +1253,9 @@ begin
       else
         begin
           if Assigned(TmpTmpAtom) then
-            WriteLn('Failed: ', AAtomPath, ' got to : ', Copy(TmpTmpAtom.AtomName.Chars,0,4))
+            TPALog.Debug('quicktimeatoms', 'atom path failed: %s (got to %s)', [AAtomPath, Copy(TmpTmpAtom.AtomName.Chars,0,4)])
           else
-            WriteLn('Failed: ', AAtomPath, ' got nowhere');
+            TPALog.Debug('quicktimeatoms', 'atom path failed: %s (got nowhere)', [AAtomPath]);
           Exit;
         end;
     end;

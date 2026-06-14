@@ -21,7 +21,7 @@ unit pa_samplerate;
 interface
 
 uses
-  Classes, SysUtils, pa_base, samplerate;
+  Classes, SysUtils, pa_base, samplerate, paio_log;
 
 
 type
@@ -74,7 +74,7 @@ begin
   FOutChannels := (DataSource.GetSourceObject as IPAAudioInformation).Channels;
   FSrc:= src_new(SRC_SINC_FASTEST, FOutChannels, @error);
   if error <> 0 then
-    WriteLn('ProcessResult: ',src_strerror(error));
+    TPALog.Error('TPASampleRateLink', 'src_new failed: ' + src_strerror(error));
   src_set_ratio(FSrc, SamplesPerSecond / (DataSource.GetSourceObject as IPAAudioInformation).SamplesPerSecond);
   //WriteLn(src_is_valid_ratio(SamplesPerSecond / (DataSource.GetSourceObject as IPAAudioInformation).SamplesPerSecond));
   //WriteLn('done Init data');
@@ -150,7 +150,7 @@ begin
 
   res:=src_process(FSrc, @sdata);
   if Res <> 0 then
-    WriteLn('ProcessResult: ',src_strerror(res));
+    TPALog.Error('TPASampleRateLink', 'src_process failed: ' + src_strerror(res));
 
   WriteToBuffer(sdata.data_out^, sdata.output_frames_gen * FOutChannels * SizeOf(cfloat), AIsLastData);
 
