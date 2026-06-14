@@ -206,6 +206,7 @@ end;
 function TPAWavSource.LoadNextChunk: Boolean;
 var
   RCount: LongInt;
+  Remaining: Int64;
 begin
   Result := False;
   RCount := FStream.Read(FCurrentChunk, SizeOf(FCurrentChunk));
@@ -217,9 +218,18 @@ begin
   end;
   FCurrentChunk.Size:=LeToN(FCurrentChunk.Size);
 
-  // fix datasize for illformed wav files.
-  if (FCurrentChunk.ID = AUDIO_CHUNK_ID_data) and (FCurrentChunk.Size = 0) then
-    FCurrentChunk.Size:=FStream.Size-FStream.Position;
+  // Clamp the data chunk to the bytes actually present. Handles a size of 0
+  // (some writers leave it unset) and a size larger than the file -- truncated
+  // files, or the 0xFFFFFFFF "until EOF" streaming sentinel. Without this an
+  // oversized DWord size reaches the signed-Integer Min() in
+  // InternalOutputToDestination as a negative count, giving a misbehaving read
+  // and an effectively infinite loop.
+  if FCurrentChunk.ID = AUDIO_CHUNK_ID_data then
+  begin
+    Remaining := FStream.Size - FStream.Position;
+    if (FCurrentChunk.Size = 0) or (FCurrentChunk.Size > Remaining) then
+      FCurrentChunk.Size := Remaining;
+  end;
 
   Result := True;
 end;
@@ -265,12 +275,24 @@ begin
     RCount := FStream.Read(Buf[WSize], Min(SizeOf(Buf)-WSize, FCurrentChunk.Size));
     Dec(FCurrentChunk.Size, RCount);
     Inc(WSize, RCount);
+    // A data chunk whose declared Size is larger than the bytes actually present
+    // (truncated/ill-formed/streaming WAV) leaves FCurrentChunk.Size > 0 while
+    // Read returns 0 at EOF. Without this guard the loop spins forever reading
+    // nothing.
+    if RCount = 0 then
+      Break;
   end;
 
   Result := FStream.Position < FStream.Size;
 
   if WSize > 0 then
     WriteToBuffer(Buf, WSize, not Result);
+
+  // No more data: tell the destinations we're done. Without this the
+  // destination worker never gets EndOfData and the pipeline hangs (the other
+  // decoder sources all signal here too).
+  if not Result then
+    SignalDestinationsDone;
 end;
 
 initialization
