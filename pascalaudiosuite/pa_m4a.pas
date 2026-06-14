@@ -142,13 +142,22 @@ begin
 
   FChunkTable := TstscAtom(FContainer.Atoms.FindAtom('moov/trak/mdia/minf/stbl/stsc'));
   FTimeToSample := TsttsAtom(FContainer.Atoms.FindAtom('moov/trak/mdia/minf/stbl/stts'));
-
   lSampleTable := TstszAtom(FContainer.Atoms.FindAtom('moov/trak/mdia/minf/stbl/stsz'));
+  lSampleOffSet := TstcoAtom(FContainer.Atoms.FindAtom('moov/trak/mdia/minf/stbl/stco'));
+
+  // these tables are required to locate (stsc/stco/stsz) and seek (stts) samples;
+  // ReadNextSample and the seek handler dereference them unconditionally.
+  if (FChunkTable = nil) or (FTimeToSample = nil) or (lSampleTable = nil) or (lSampleOffSet = nil) then
+  begin
+    TPALog.Warning(ClassName, 'init failed: missing sample tables (stsc/stts/stsz/stco)');
+    DeInitAudio;
+    Exit;
+  end;
+
   SetLength(FSampleTable, lSampleTable.SampleCount);
   //Writeln(Length(FSampleTable), ' samples');
   lSampleTable.CopySampleTable(@FSampleTable[0]);
 
-  lSampleOffSet := TstcoAtom(FContainer.Atoms.FindAtom('moov/trak/mdia/minf/stbl/stco'));
   SetLength(FChunkOffset, lSampleOffSet.Count);
   lSampleOffSet.CopyTable(@FChunkOffset[0]);
 
@@ -283,8 +292,18 @@ begin
     PAM_Seek:
       if FInited then
       begin
-        lSample := Trunc(Double((SamplesPerSecond / Channels) * AMsg.Data));
+        // AMsg.Data is the target position in seconds. Convert to the media time
+        // position (PCM samples, since the AAC media timescale is the sample
+        // rate) and map that to a frame index via the stts table. The old code
+        // divided by Channels, so every seek on a multichannel file landed at
+        // position/Channels; GetPosition has no such factor, so seek disagreed
+        // with the reported position.
+        lSample := Trunc(Double(SamplesPerSecond * AMsg.Data));
         lSampleIndex := FTimeToSample.FindSampleIndex(lSample, lOffset);
+        if lSampleIndex < 0 then
+          lSampleIndex := 0
+        else if lSampleIndex > Length(FSampleTable) then
+          lSampleIndex := Length(FSampleTable);
         FSampleIndex:=lSampleIndex;
       end;
   else
@@ -309,6 +328,10 @@ end;
 
 function TPAM4ADecoderSource.GetMaxPosition: Double;
 begin
+  // can be queried before playback starts (FTimeToSample/SamplesPerSecond not
+  // ready yet); guard against a nil deref and a divide by zero.
+  if (not FInited) or (FTimeToSample = nil) or (SamplesPerSecond = 0) then
+    Exit(0);
   Result := FTimeToSample.TotalSamples /  SamplesPerSecond;
 end;
 
