@@ -43,9 +43,6 @@ type
     function InternalOutputToDestination: Boolean; override;
   public
     destructor Destroy; override;
-    procedure Play;
-    procedure Pause;
-    procedure Stop;
     property  Position: Double read GetPosition write SetPosition;
     property  MaxPosition: Double read GetMaxPosition;
     property Stream;
@@ -181,21 +178,6 @@ begin
     FFlac.Flush;
     SignalDestinationsDone;
   end;
-end;
-
-procedure TPAFlacSource.Play;
-begin
-
-end;
-
-procedure TPAFlacSource.Pause;
-begin
-
-end;
-
-procedure TPAFlacSource.Stop;
-begin
-
 end;
 
 initialization

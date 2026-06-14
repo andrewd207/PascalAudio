@@ -51,10 +51,6 @@ type
     constructor Create(AStream: TStream; AOwnsStream: Boolean); override;
     destructor Destroy; override;
     procedure InitValues;
-    //IPAPlayable
-    procedure Play;
-    procedure Pause;
-    procedure Stop;
     //IStreamSource
     property Stream;
     //IPAPlayable
@@ -237,21 +233,6 @@ begin
   Format:=afFloat32;
   // rewind so the worker's decoder reads from where we started.
   FStream.Position:=StartPos;
-end;
-
-procedure TPAOggVorbisDecoderSource.Play;
-begin
-
-end;
-
-procedure TPAOggVorbisDecoderSource.Pause;
-begin
-
-end;
-
-procedure TPAOggVorbisDecoderSource.Stop;
-begin
-
 end;
 
 initialization

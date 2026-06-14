@@ -47,6 +47,11 @@ type
                  afFloat32
                  );
 
+  // Transport state for a source. Distinct from Working: a paused source is not
+  // Working (its pump is halted) but has NOT reached end-of-data, so a player can
+  // tell "paused" apart from "finished".
+  TPAPlayState = (psStopped, psPlaying, psPaused);
+
   PAudioBuffer = ^TAudioBuffer;
   TAudioBuffer = record
     Data: array [0..AUDIO_BUFFER_SIZE-1] of byte; // 4096 samples @ 2 bytes per sample.
@@ -208,12 +213,17 @@ type
   private
     FDestinations: specialize TFPGList<IPAAudioDestination>;
     FWorking: Boolean;
+  protected
+    // owned by the transport (Play/Pause/Stop in TPAStreamSource) and the worker
+    // loop, which sets psStopped when the source reaches end-of-data.
+    FPlayState: TPAPlayState;
   public
     constructor Create; override;
     destructor Destroy; override;
     procedure StartData;
     function  Working: Boolean;
     procedure StopData; // Unsets wait event
+    property  PlayState: TPAPlayState read FPlayState;
   end;
 
   PBufferWaitEvent = ^TBufferWaitEvent;
@@ -1197,14 +1207,23 @@ begin
             BeforeExecuteLoop;
           end;
         //WriteLn(ClassName,' :Source Loop');
-          if InternalOutputToDestination = False then
+          // Only pump while playing. Pause/Stop clear FWorking (via
+          // StopData/PAM_StopWorking); a PAM_Data still sitting in the queue at
+          // that point must be ignored outright -- not just left un-reposted --
+          // otherwise it would read (and emit) one more buffer past the pause, and
+          // for Stop it would advance the position again after the rewind seek.
+          if not FWorking then
+            // halted: drop this stray data tick.
+          else if InternalOutputToDestination = False then
           begin
             //WriteLn('Stopping Data');
+            // reached end-of-data: the source is finished, not paused.
+            FPlayState := psStopped;
             StopData;
           end
           else
           begin
-            // keep processing data
+            // keep the self-perpetuating pump going.
             if not Self.InheritsFrom(TPAAudioLink) then
               FMsgQueue.PostMessage(PAM_Data);
           end;
@@ -1487,6 +1506,7 @@ begin
   FSignaled:=False;
   FMsgQueue.PostMessage(PAM_Data);
   FWorking:=True;
+  FPlayState:=psPlaying;
 end;
 
 function TPAAudioSource.Working: Boolean;

@@ -52,9 +52,6 @@ type
     function  GetMaxPosition: Double;
   public
     // IPAPlayable
-    procedure Play;
-    procedure Pause;
-    procedure Stop;
     property  Position: Double read GetPosition write SetPosition;
     property  MaxPosition: Double read GetMaxPosition;
   end;
@@ -425,21 +422,6 @@ begin
   if (not FValid) or (FBytesPerSecond = 0) then
     Exit(0);
   Result := FDataSize / FBytesPerSecond;
-end;
-
-procedure TPAWavSource.Play;
-begin
-
-end;
-
-procedure TPAWavSource.Pause;
-begin
-
-end;
-
-procedure TPAWavSource.Stop;
-begin
-
 end;
 
 initialization

@@ -38,10 +38,6 @@ type
     constructor Create(AStream: TStream; AOwnsStream: Boolean); override;
     destructor Destroy; override;
     procedure InitValues;
-    //IPAPlayable
-    procedure Play;
-    procedure Pause;
-    procedure Stop;
     //IStreamSource
     property Stream;
     //IPAPlayable
@@ -229,21 +225,6 @@ begin
   finally
     Tmp.Free;
   end;
-end;
-
-procedure TPAOggOpusDecoderSource.Play;
-begin
-
-end;
-
-procedure TPAOggOpusDecoderSource.Pause;
-begin
-
-end;
-
-procedure TPAOggOpusDecoderSource.Stop;
-begin
-
 end;
 
 end.

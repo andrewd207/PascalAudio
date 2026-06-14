@@ -61,9 +61,6 @@ type
     function  GetMaxPosition: Double;
   public
     function  CanSeek: Boolean;
-    procedure Play;
-    procedure Pause;
-    procedure Stop;
     property  Position: Double read GetPosition write SetPosition;
     property  MaxPosition: Double read GetMaxPosition;
     constructor Create(AStream: TStream; AOwnsStream: Boolean=True); override;
@@ -338,21 +335,6 @@ end;
 function TPAM4ADecoderSource.CanSeek: Boolean;
 begin
   Result := True;
-end;
-
-procedure TPAM4ADecoderSource.Play;
-begin
-
-end;
-
-procedure TPAM4ADecoderSource.Pause;
-begin
-
-end;
-
-procedure TPAM4ADecoderSource.Stop;
-begin
-
 end;
 
 constructor TPAM4ADecoderSource.Create(AStream: TStream; AOwnsStream: Boolean);

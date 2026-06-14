@@ -41,6 +41,12 @@ type
     constructor Create; override; // you must set ownsstream and stream
     constructor Create(AStream: TStream; AOwnsStream: Boolean = True); virtual;
     destructor Destroy; override;
+    // IPAPlayable transport, shared by every source. Seek-capable codecs supply
+    // CanSeek/SetPosition (via IPAPlayable); Stop only rewinds when the source can
+    // seek -- a non-seekable source (e.g. a pipe) just halts in place.
+    procedure Play; virtual;
+    procedure Pause; virtual;
+    procedure Stop; virtual;
     property  Stream: TStream read GetStream write SetStream;
     property  OwnsStream: Boolean read GetOwnsStream write SetOwnsStream;
   end;
@@ -129,6 +135,39 @@ begin
   if FOwnsStream and Assigned(FStream) then
     FreeAndNil(FStream);
   inherited Destroy;
+end;
+
+procedure TPAStreamSource.Play;
+begin
+  if FPlayState = psPlaying then
+    Exit;
+  // From both psStopped and psPaused, (re)starting the pump resumes from the
+  // source's current read position. StartData sets FPlayState := psPlaying.
+  StartData;
+end;
+
+procedure TPAStreamSource.Pause;
+begin
+  if FPlayState <> psPlaying then
+    Exit;
+  // Halt the pump without signalling end-of-data, so downstream links/destinations
+  // stay alive and simply stop receiving. The worker clears FWorking, which stops
+  // the self-reposted PAM_Data cycle.
+  StopData;
+  FPlayState := psPaused;
+end;
+
+procedure TPAStreamSource.Stop;
+var
+  Playable: IPAPlayable;
+begin
+  if FPlayState <> psStopped then
+    StopData;
+  FPlayState := psStopped;
+  // Rewind to the start, but only if this source actually supports seeking; a
+  // non-seekable source (a pipe, a live stream) simply stops where it is.
+  if Supports(Self, IPAPlayable, Playable) and Playable.CanSeek then
+    Playable.SetPosition(0);
 end;
 
 { TPAStreamDestination }
