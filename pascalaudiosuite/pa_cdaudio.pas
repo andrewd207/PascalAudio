@@ -202,8 +202,6 @@ begin
     frame:= AFrame mod 75;
     minute:= Secs div 60;
     second:= Secs mod 60;
-
-    WriteLn(Format('%d:%d.%d',[minute,second,frame]));
   end;
 end;
 
@@ -229,24 +227,35 @@ begin
 
   RCount := Min(FLastFrame-FFrameIndex, 4);
 
+  // No more frames to read: tell the destinations we're done. Without this the
+  // destination worker never gets EndOfData and the pipeline hangs (the other
+  // decoder sources all signal here too).
+  if RCount <= 0 then
+  begin
+    SignalDestinationsDone;
+    Exit; // Result is already False
+  end;
+
   ra.addr := FrameToCDAddr(FFrameIndex);
   ra.addr_format:=CDROM_MSF;
   ra.nframes:=RCount;
   ra.buf:=@buffer;
 
-  if RCount > 0 then
+  res := FpIOCtl(FHandle,CDROMREADAUDIO,@ra);
+  if Res = 0 then
   begin
-    res := FpIOCtl(FHandle,CDROMREADAUDIO,@ra);
-    if Res = 0 then
-    begin
-      Inc(FFrameIndex, ra.nframes);
-      WriteToBuffer(buffer[0], ra.nframes*FRAME_SIZE, FFrameIndex < FLastFrame);
-      Result := True;
-    end;
-
-  end;
-
-
+    Inc(FFrameIndex, ra.nframes);
+    // IsEndOfData must be set on the *last* buffer. The old test
+    // (FFrameIndex < FLastFrame) was inverted -- it was True while more data
+    // remained and False on the final buffer -- so the end flag was never set.
+    Result := FFrameIndex < FLastFrame;
+    WriteToBuffer(buffer[0], ra.nframes*FRAME_SIZE, not Result);
+    if not Result then
+      SignalDestinationsDone;
+  end
+  else
+    // the read failed: signal done rather than spinning on a bad device/disc.
+    SignalDestinationsDone;
 end;
 
 constructor TPAAudioCDSource.Create;
