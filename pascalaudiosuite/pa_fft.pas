@@ -119,6 +119,9 @@ constructor TPAFFTLink.Create;
 begin
   inherited Create;
   InitCriticalSection(FCrit);
+  // we hand float32 downstream (GetFormat forces input conversion), so tag our
+  // output as float32 too -- WriteToDestinations stamps buffers with this.
+  Format := afFloat32;
   FWindowSize := 1024;
   FBandCount := 0;
   FMode := fcmMixToMono;
@@ -349,7 +352,6 @@ end;
 
 function TPAFFTLink.InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64;
 var
-  B: PAudioBuffer;
   Samples: PSingle;
   frames, f, c, base: Integer;
   acc: Single;
@@ -357,13 +359,11 @@ begin
   if FNeedInit then
     InitData;
 
-  // 1) forward the data downstream unchanged (passthrough)
-  B := BufferPool.GetBufferFromPool(True);
-  B^.Format      := Format;
-  B^.UsedData    := ACount;
-  B^.IsEndOfData := AIsLastData;
-  Move(AData, B^.Data, ACount);
-  WriteToDestinations(B);
+  // 1) forward the data downstream unchanged (passthrough). Use WriteToBuffer,
+  // which chunks into AUDIO_BUFFER_SIZE pieces -- a single pooled buffer is only
+  // AUDIO_BUFFER_SIZE bytes, and ACount can exceed that (e.g. when the framework
+  // up-converts S16->float32 before calling us), so a raw Move would overflow.
+  WriteToBuffer(AData, ACount, AIsLastData);
 
   // 2) feed the analyser. Data is float32 (GetFormat forces conversion).
   Samples := PSingle(@AData);
