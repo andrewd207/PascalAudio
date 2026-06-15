@@ -142,6 +142,10 @@
         <Filename Value="paio_ogg_opus.pas"/>
         <UnitName Value="paio_ogg_opus"/>
       </Item>
+      <Item>
+        <Filename Value="paio_fft.pas"/>
+        <UnitName Value="paio_fft"/>
+      </Item>
     </Files>
     <RequiredPkgs>
       <Item>

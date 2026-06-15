@@ -14,7 +14,7 @@ uses
   noiseremovalmultichannel, paio_messagequeue, paio_faad2, paio_mmdevice, 
   mp4codec, mp4muxer, paio_faac, mp4codec_mp4a, quicktimeatoms, 
   quicktimecontainer, paio_opus, paio_ogg_container, paio_vorbis_comment, 
-  paio_ogg_opus, LazarusPackageIntf;
+  paio_ogg_opus, paio_fft, LazarusPackageIntf;
 
 implementation
 
