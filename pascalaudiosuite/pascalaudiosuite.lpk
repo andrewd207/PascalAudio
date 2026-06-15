@@ -11,7 +11,7 @@
       <Conditionals Value="if SrcOS = &apos;unix&apos; then
   CustomOptions+=&apos;-dUSEPULSE&apos;;"/>
     </CompilerOptions>
-    <Files Count="20">
+    <Files Count="21">
       <Item1>
         <Filename Value="pa_base.pas"/>
         <UnitName Value="pa_base"/>
@@ -92,6 +92,10 @@
         <Filename Value="pa_ogg_opus.pas"/>
         <UnitName Value="pa_ogg_opus"/>
       </Item20>
+      <Item21>
+        <Filename Value="pa_observer.pas"/>
+        <UnitName Value="pa_observer"/>
+      </Item21>
     </Files>
     <RequiredPkgs Count="3">
       <Item1>
