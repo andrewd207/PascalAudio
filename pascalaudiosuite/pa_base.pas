@@ -190,14 +190,12 @@ type
   // First link in a chain.
   TPAAudioSource = class(TPAAudioInformationBase, IPAAudioSource)
   private
-    E: Exception;
     FFreeEvent: TSimpleEvent; // only used during the destructor
     FDestroySynced: Boolean;  // ensures DestroyWaitSync only runs once
     FSignaled: Boolean;
     FDestBuf: PAudioBuffer;
     //Datasource: IPAAudioSource;
     procedure EnsureAudioBuffer;
-    procedure RaiseE;
   protected
     function  DestroyWaitSync: Boolean;
     procedure Execute; override;
@@ -1288,10 +1286,12 @@ begin
 
     except
       on E: Exception do
-      begin
+        // Just log on the worker thread. We must NOT Synchronize here: the call
+        // it marshalled (RaiseE) was a no-op anyway, and during shutdown the main
+        // thread is no longer pumping CheckSynchronize, so Synchronize itself
+        // raises EThreadError ('Thread error') -- unhandled, right inside this
+        // handler -- which is the crash users saw on closing while playing.
         TPALog.Error(ClassName, E.Message);
-        Synchronize(@RaiseE);
-      end;
     end;
   end;
   AfterExecuteLoop;
@@ -1313,10 +1313,6 @@ begin
   //WriteLn(ClassName,' got buffer');
 end;
 
-procedure TPAAudioSource.RaiseE;
-begin
-  //Raise E;
-end;
 
 function TPAAudioSource.DestroyWaitSync: Boolean;
 begin
@@ -1416,10 +1412,12 @@ begin
 
     except
       on E: Exception do
-      begin
+        // Just log on the worker thread. We must NOT Synchronize here: the call
+        // it marshalled (RaiseE) was a no-op anyway, and during shutdown the main
+        // thread is no longer pumping CheckSynchronize, so Synchronize itself
+        // raises EThreadError ('Thread error') -- unhandled, right inside this
+        // handler -- which is the crash users saw on closing while playing.
         TPALog.Error(ClassName, E.Message);
-        Synchronize(@RaiseE);
-      end;
     end;
   end;
   AfterExecuteLoop;
