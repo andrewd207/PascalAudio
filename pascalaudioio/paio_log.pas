@@ -66,7 +66,9 @@ type
     class procedure Error  (const ASource, AMessage: String); static; overload;
     class procedure Error  (const ASource, AFmt: String; const AArgs: array of const); static; overload;
 
-    // Messages below this level are dropped. Defaults to llInfo.
+    // Messages below this level are dropped. Defaults to llWarning, so routine
+    // Info "initialized" chatter stays off the console; set llInfo/llDebug to
+    // see more.
     class property MinLevel: TPALogLevel read GetMinLevel write SetMinLevel;
     // The single process-wide sink. Set to nil to restore the StdErr default.
     class property Handler: TPALogEvent read GetHandler write SetHandler;

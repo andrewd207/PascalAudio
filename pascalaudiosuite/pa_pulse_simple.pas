@@ -63,8 +63,11 @@ begin
   //WriteLn('Pulse Channels = ', SS.Channels);
   //Writeln('Pulse Rate = ', SS.Rate);
 
+  error := 0;
   FPulse:=TPASimple.New(nil,PChar(ParamStr(0)),sdPLAYBACK, nil, 'test', @SS, nil, nil, @error);
-  if error < 0 then
+  // New returns nil on failure (and only then is error meaningful); test that
+  // rather than the possibly-uninitialised error out-param.
+  if FPulse = nil then
     TPALog.Error('pa_pulse_simple', 'init failed: ' + pa_strerror(error));
 end;
 
@@ -81,14 +84,24 @@ function TPAPulseDestination.InternalProcessData(const AData; ACount: Int64;
   AIsLastData: Boolean): Int64;
 var
   Error: cint;
+  Res: cint;
 begin
   if not FInited then
     Init;
   Result := ACount;
-  //WriteLn('Writing to pulse');
-  FPulse^.Write(@AData, ACount, @error);
-  if error < 0 then
-    TPALog.Error('pa_pulse_simple', 'write failed: ' + pa_strerror(error));
+  // Only write when there's actually data: an end-of-data buffer can arrive
+  // empty, and a zero-length write is pointless.
+  if ACount > 0 then
+  begin
+    Error := 0;
+    // Check Write's RETURN value, not the error out-param: pa_simple_write only
+    // sets *error when it fails (return < 0). The old code tested the out-param
+    // directly, so on success it read uninitialised stack garbage and logged
+    // spurious "write failed:" errors.
+    Res := FPulse^.Write(@AData, ACount, @Error);
+    if Res < 0 then
+      TPALog.Error('pa_pulse_simple', 'write failed: ' + pa_strerror(Error));
+  end;
   if AIsLastData then
     DeInit;
 end;
