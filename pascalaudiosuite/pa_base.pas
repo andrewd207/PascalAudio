@@ -199,6 +199,11 @@ type
   protected
     function  DestroyWaitSync: Boolean;
     procedure Execute; override;
+    // Called from the worker loop's exception handler. Logs the error (with a
+    // backtrace) and then signals-and-stops: tells the destinations the stream
+    // is done so the pipeline shuts down cleanly and the UI sees Working=False,
+    // instead of silently freezing the pump.
+    procedure HandleWorkerException(E: Exception);
     procedure BeforeExecuteLoop; virtual;
     procedure AfterExecuteLoop; virtual;
     function InternalOutputToDestination: Boolean; virtual; abstract;
@@ -418,6 +423,23 @@ uses
 procedure MaskAudioFPExceptions;
 begin
   SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow, exUnderflow, exPrecision]);
+end;
+
+// Format a worker-thread exception for the log. A bare message like "Thread
+// error" (FPC's fpc_threaderror, raised when a pthread primitive fails) is
+// useless without a location, so append the raise address and the captured
+// backtrace. Build the program with debug info (-gl / Makefile DEBUG=1) for the
+// addresses to resolve to unit+line.
+function WorkerExceptionInfo(E: Exception): String;
+var
+  i: Integer;
+  Frames: PPointer;
+begin
+  Result := E.ClassName + ': ' + E.Message + LineEnding +
+            '  at ' + BackTraceStrFunc(ExceptAddr);
+  Frames := ExceptFrames;
+  for i := 0 to ExceptFrameCount - 1 do
+    Result := Result + LineEnding + '  ' + BackTraceStrFunc(Frames[i]);
 end;
 
 var
@@ -1286,12 +1308,12 @@ begin
 
     except
       on E: Exception do
-        // Just log on the worker thread. We must NOT Synchronize here: the call
-        // it marshalled (RaiseE) was a no-op anyway, and during shutdown the main
-        // thread is no longer pumping CheckSynchronize, so Synchronize itself
-        // raises EThreadError ('Thread error') -- unhandled, right inside this
-        // handler -- which is the crash users saw on closing while playing.
-        TPALog.Error(ClassName, E.Message);
+        // Handle on the worker thread -- log + signal-and-stop. We must NOT
+        // Synchronize here: during shutdown the main thread is no longer pumping
+        // CheckSynchronize, so Synchronize itself raises EThreadError ('Thread
+        // error'), unhandled, right inside this handler -- which is the crash
+        // users saw on closing while playing.
+        HandleWorkerException(E);
     end;
   end;
   AfterExecuteLoop;
@@ -1412,15 +1434,39 @@ begin
 
     except
       on E: Exception do
-        // Just log on the worker thread. We must NOT Synchronize here: the call
-        // it marshalled (RaiseE) was a no-op anyway, and during shutdown the main
-        // thread is no longer pumping CheckSynchronize, so Synchronize itself
-        // raises EThreadError ('Thread error') -- unhandled, right inside this
-        // handler -- which is the crash users saw on closing while playing.
-        TPALog.Error(ClassName, E.Message);
+        // Handle on the worker thread -- log + signal-and-stop. We must NOT
+        // Synchronize here: during shutdown the main thread is no longer pumping
+        // CheckSynchronize, so Synchronize itself raises EThreadError ('Thread
+        // error'), unhandled, right inside this handler -- which is the crash
+        // users saw on closing while playing.
+        HandleWorkerException(E);
     end;
   end;
   AfterExecuteLoop;
+end;
+
+procedure TPAAudioSource.HandleWorkerException(E: Exception);
+begin
+  TPALog.Error(ClassName, WorkerExceptionInfo(E));
+  // Signal-and-stop. A worker exception mid-stream (e.g. a failed pthread
+  // primitive surfacing as "Thread error") used to just drop the data tick and
+  // leave the pump frozen -- the stream went silent with no end-of-data, so the
+  // destination and the UI's Working flag never settled. Instead, tell the
+  // destinations we're finished and stop pumping. We are on the worker thread,
+  // so clearing FWorking directly is safe; stray PAM_Data ticks are then
+  // ignored and the thread idles until destroyed.
+  //
+  // Guard the cleanup: SignalDestinationsDone reuses the same machinery that
+  // just threw, and a second exception escaping this handler would crash the
+  // thread. It is idempotent (FSignaled), so a partial earlier signal is fine.
+  try
+    FPlayState := psStopped;
+    FWorking := False;
+    SignalDestinationsDone;
+  except
+    on E2: Exception do
+      TPALog.Error(ClassName, 'error during shutdown after worker exception: ' + E2.Message);
+  end;
 end;
 
 procedure TPAAudioSource.BeforeExecuteLoop;
