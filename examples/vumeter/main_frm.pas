@@ -78,7 +78,7 @@ const
   VU_FIXED_REF = 8.0;
   // Fixed logarithmic range for nmLog: magnitudes from VU_LOG_LO..VU_LOG_HI map
   // bottom..top, each 10x taking equal vertical space. Here ~4 decades.
-  VU_LOG_LO = 0.01;
+  VU_LOG_LO = 0.2;
   VU_LOG_HI = 100.0;
 
 { TVUMeter }
