@@ -46,6 +46,7 @@ type
     FName: AnsiString;
     FLastError: AnsiString;
     FOpen: Boolean;
+    FTargetLatencyMS: LongWord;
   public
     constructor Create(const AName: AnsiString; ARate, AChannels: Integer; AFormat: TPASampleFormat);
     destructor Destroy; override;
@@ -53,6 +54,11 @@ type
     // context and playback stream are ready. Returns False on failure (see
     // LastError).
     function  Open(const ADevice: AnsiString = ''): Boolean;
+    // Cap the server-side buffer to roughly this many milliseconds (with
+    // PA_STREAM_ADJUST_LATENCY) so the writer is paced close to real time
+    // instead of racing ahead into PulseAudio's large default (~2 s) buffer.
+    // 0 (default) keeps the server's default sizing. Set before Open.
+    property  TargetLatencyMS: LongWord read FTargetLatencyMS write FTargetLatencyMS;
     // write ASize bytes, blocking until the server has accepted all of them.
     // returns the number of bytes written.
     function  Write(const AData; ASize: Integer): Integer;
@@ -117,6 +123,8 @@ var
   cstate: TPAContextState;
   sstate: TPAStreamState;
   dev: PChar;
+  FAttr: TPABufferAttr;
+  ConnRes: cint;
 begin
   Result := False;
   FLastError := '';
@@ -175,7 +183,21 @@ begin
     else
       dev := PChar(ADevice);
 
-    if FStream^.ConnectPlayback(dev, nil, 0, nil, nil) < 0 then
+    if FTargetLatencyMS > 0 then
+    begin
+      // -1 (all bits set) means "let the server pick". We must bound maxlength,
+      // not just tlength: the server ACCEPTS writes up to maxlength even though
+      // it only TARGETS tlength, so leaving maxlength at the ~4 MB default lets
+      // the writer race ~seconds ahead. Cap maxlength so back-pressure paces the
+      // whole chain to real time. ADJUST_LATENCY bounds overall sink latency.
+      FillChar(FAttr, SizeOf(FAttr), $FF);
+      FAttr.tlength   := pa_usec_to_bytes(QWord(FTargetLatencyMS) * 1000, @FSpec);
+      FAttr.maxlength := FAttr.tlength * 2;
+      ConnRes := FStream^.ConnectPlayback(dev, @FAttr, LongWord(streamflagADJUST_LATENCY), nil, nil);
+    end
+    else
+      ConnRes := FStream^.ConnectPlayback(dev, nil, 0, nil, nil);
+    if ConnRes < 0 then
     begin
       FLastError := 'stream connect failed';
       Exit;

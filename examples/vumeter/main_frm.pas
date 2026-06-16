@@ -16,14 +16,15 @@ type
 
   TVUMeter = class(TfpgWidget)
   private
-    FBars: array of Single;   // displayed level 0..1 (with smooth fall-off)
+    FBars: array of Single;   // displayed level 0..1 (with snappy fall-off)
     FRef: Single;             // adaptive normalisation reference
   protected
     procedure HandlePaint; override;
+    procedure HandleResize(AWidth, AHeight: TfpgCoord); override; // repaint on resize
   public
     constructor Create(AOwner: TComponent); override;
-    procedure SetBands(const AValues: array of Single); // raw band energies
-    procedure Decay;                                     // ease bars toward 0
+    procedure SetBands(const AValues: array of Single); // update bars from a spectrum
+    procedure Decay;                                    // ease bars toward 0 when idle
   end;
 
   { TMainForm }
@@ -40,8 +41,6 @@ type
     FFileName: String;
     procedure btnOpenClick(Sender: TObject);
     procedure PumpTimer(Sender: TObject);
-    procedure GotSpectrum(Sender: TObject; const AMagnitudes: array of Single;
-      AChannel, ASampleRate: Integer);
     function  GetFilter: String;
     procedure OpenFile(AFileName: String);
   public
@@ -52,7 +51,7 @@ type
 implementation
 
 uses
-  pa_dec_oggvorbis, pa_flac, pa_wav, pa_m4a, pa_register, pa_pulse_simple,
+  pa_dec_oggvorbis, pa_flac, pa_wav, pa_m4a, pa_register, pa_pulse,
   fpg_dialogs;
 
 const
@@ -85,7 +84,7 @@ begin
   if mx > FRef then
     FRef := mx
   else
-    FRef := FRef * 0.95 + mx * 0.05;
+    FRef := FRef * 0.80 + mx * 0.20; // re-scale to quieter passages quickly
   if FRef < 1e-6 then
     FRef := 1e-6;
 
@@ -95,9 +94,9 @@ begin
     if v > 1 then
       v := 1;
     if v > FBars[i] then
-      FBars[i] := v                       // rise instantly
+      FBars[i] := v                        // rise instantly to catch transients
     else
-      FBars[i] := FBars[i] * 0.7 + v * 0.3; // fall smoothly
+      FBars[i] := FBars[i] * 0.4 + v * 0.6; // snappy fall
   end;
   Invalidate;
 end;
@@ -113,20 +112,25 @@ end;
 
 procedure TVUMeter.HandlePaint;
 var
-  i, gap, bw, x, bh: Integer;
+  i, gap, bw, x, bh, w, h: Integer;
   c: TfpgColor;
 begin
   Canvas.Clear(clBlack);
   if Length(FBars) = 0 then
     Exit;
+  // Use ActualWidth/Height, not Width/Height: the latter return the *preferred*
+  // size, which doesn't change on a runtime (anchor) resize, so the bars would
+  // keep drawing at the original dimensions.
+  w := ActualWidth;
+  h := ActualHeight;
   gap := 3;
-  bw := (Width - gap * (Length(FBars) + 1)) div Length(FBars);
+  bw := (w - gap * (Length(FBars) + 1)) div Length(FBars);
   if bw < 1 then
     bw := 1;
   for i := 0 to High(FBars) do
   begin
     x  := gap + i * (bw + gap);
-    bh := Round(FBars[i] * Height);
+    bh := Round(FBars[i] * h);
     if FBars[i] >= 0.85 then
       c := clRed
     else if FBars[i] >= 0.6 then
@@ -134,28 +138,46 @@ begin
     else
       c := clGreen;
     Canvas.SetColor(c);
-    Canvas.FillRectangle(x, Height - bh, bw, bh);
+    Canvas.FillRectangle(x, h - bh, bw, bh);
   end;
+end;
+
+procedure TVUMeter.HandleResize(AWidth, AHeight: TfpgCoord);
+begin
+  inherited HandleResize(AWidth, AHeight);
+  // bar widths/heights are derived from Width/Height in HandlePaint, so force a
+  // full repaint whenever the anchors stretch us -- otherwise we keep drawing at
+  // the old size.
+  Invalidate;
 end;
 
 { TMainForm }
 
-procedure TMainForm.GotSpectrum(Sender: TObject; const AMagnitudes: array of Single;
-  AChannel, ASampleRate: Integer);
-begin
-  // Runs on the main thread (the FFT link marshals via Queue and PumpTimer
-  // pumps the queue). NOTE: this spectrum is for audio that is still buffered
-  // downstream in PulseAudio, so visually it leads the speakers by the output
-  // latency. Shrink the Pulse buffer or delay the display to tighten sync.
-  FMeter.SetBands(AMagnitudes);
-end;
-
 procedure TMainForm.PumpTimer(Sender: TObject);
+var
+  ch: Integer;
+  mag: TSingleArray;
+  got: Boolean;
 begin
-  // fpGUI's loop doesn't pump TThread.Queue for us, so do it here. This is what
-  // actually delivers GotSpectrum on the main thread.
-  CheckSynchronize(0);
-  if (FDest = nil) or (not FDest.Working) then
+  // The FFT link produces one frame per FrameIntervalMS of *audio*, but they
+  // arrive in bursts (Pulse hands us data in chunks). The FIFO is our jitter
+  // buffer: consume exactly ONE frame per tick so a burst plays out smoothly
+  // over the following ticks instead of collapsing into a single update. Only
+  // drop frames when we've genuinely fallen behind, to stay synced to "now".
+  ch := 0;
+  mag := nil;
+  got := False;
+  if Assigned(FFFT) then
+  begin
+    // catch up: if the backlog is deep we're behind playback, so discard the
+    // stale frames and keep latency low (leave a couple as cushion).
+    while FFFT.BufferedFrameCount > 2 do
+      FFFT.PullFrame(ch, mag);
+    got := FFFT.PullFrame(ch, mag); // then show a single frame this tick
+  end;
+  if got then
+    FMeter.SetBands(mag)
+  else if (FDest = nil) or (not FDest.Working) then
     FMeter.Decay; // drain the bars when nothing is playing
 end;
 
@@ -183,24 +205,38 @@ begin
 end;
 
 procedure TMainForm.OpenFile(AFileName: String);
+var
+  Pulse: TPAPulseAsyncDestination;
 begin
-  // detach the sink, then rebuild source + FFT link for the new file (channel
-  // count / sample rate may differ, and the link captures them at first data).
+  // Rebuild the whole chain for the new file. The sink is recreated too: reusing
+  // a Pulse stream after it drained on the previous song's end-of-data leaves it
+  // corked/with stale buffering, so the second song pulled data slowly (choppy).
   if Assigned(FDest) then
     FDest.DataSource := nil;
   FreeAndNil(FSource);
   FreeAndNil(FFFT);
+  FreeAndNil(FDest);
 
   FSource := PARegisteredGetDecoderClass(AFileName, False).Create(
                TFileStream.Create(AFileName, fmOpenRead));
 
   FFFT := TPAFFTLink.Create;
-  FFFT.BandCount   := BANDS;          // 16 log-spaced bars
-  FFFT.ChannelMode := fcmMixToMono;
-  FFFT.OnSpectrum  := @GotSpectrum;
+  FFFT.BandCount       := BANDS;        // 16 log-spaced bars
+  FFFT.ChannelMode     := fcmMixToMono;
+  FFFT.FrameIntervalMS := 16;           // one spectrum per 16 ms of audio (~60 fps)
+  // The timer pulls frames; we never need the buffer to grow much.
+  FFFT.MaxBufferedFrames := 16;
 
   if not Assigned(FDest) then
-    FDest := PARegisteredGetDeviceOut('').Create;
+  begin
+    // Use the async Pulse sink with a small buffer: the default (registered
+    // simple) sink buffers ~0.5 s, so it pulls data in big bursts and the
+    // analyser produces spectra only ~twice a second (choppy meter). A small
+    // LatencyMS makes Pulse pull often, so spectra arrive smoothly.
+    Pulse := TPAPulseAsyncDestination.Create;
+    Pulse.LatencyMS := 40;
+    FDest := Pulse;
+  end;
 
   // chain: decoder -> FFT analyser -> audio out
   FFFT.DataSource := FSource;
@@ -260,8 +296,8 @@ begin
     Anchors := [anLeft, anRight, anTop, anBottom];
   end;
 
-  // ~33 fps: pumps queued spectra and animates fall-off
-  FPump := TfpgTimer.Create(30);
+  // ~60 fps: pumps queued spectra at the frame rate
+  FPump := TfpgTimer.Create(16);
   FPump.OnTimer := @PumpTimer;
   FPump.Enabled := True;
 end;

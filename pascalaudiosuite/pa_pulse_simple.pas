@@ -95,8 +95,7 @@ end;
 
 constructor TPAPulseDestination.Create;
 begin
-  BufferPool.AllocateBuffers(4);
-  inherited Create;
+  inherited Create; // base destination provides its 2 pooled buffers
   Format := afFloat32;
 end;
 

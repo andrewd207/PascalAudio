@@ -125,10 +125,14 @@ type
     property OwnsStream: Boolean;
   end;
 
+  // One send message carries the produced buffer plus every destination that
+  // still wants it. The worker thread does the fan-out: the last destination
+  // gets the original buffer, earlier ones get copies (so a copy is only ever
+  // made when there is real fan-out). See TPAAudioSource.DeliverBufferMessage.
   TPABufferMessage = class(TPAIOMessage)
     Buffer: PAudioBuffer;
-    Dest: IPAAudioDestination;
-    constructor Create(ABuffer: PAudioBuffer; ADest: IPAAudioDestination);
+    Dests: array of IPAAudioDestination;
+    constructor Create(ABuffer: PAudioBuffer; const ADests: array of IPAAudioDestination);
     destructor Destroy; override;
   end;
 
@@ -206,6 +210,16 @@ type
     procedure RemoveDestination(AValue: IPAAudioDestination); virtual;
     procedure WriteToDestinations(const ABuffer: PAudioBuffer);{ virtual;}
     function  WriteToBuffer(const AData; ASize: Integer; AIsLastData: Boolean): Integer;
+    // Fan a send message out to its destinations: the last one gets the original
+    // buffer, earlier ones get copies. Returns True when every destination has
+    // accepted it (message can be freed), or False if a destination's queue was
+    // full -- the message keeps the not-yet-delivered destinations and the caller
+    // re-queues it to retry. Runs on the worker thread.
+    function  DeliverBufferMessage(AMsg: TPABufferMessage): Boolean;
+    // Deliver pending PAM_SendBuffer messages (output we've produced but not yet
+    // handed downstream) without producing more, so a thread blocked in
+    // GetBufferFromPool can unstick the chain. Runs on this stage's worker thread.
+    procedure FlushPendingSends;
     procedure SignalDestinationsDone; virtual;
     function  GetSourceObject: TObject;
     procedure ClearSignal;
@@ -239,14 +253,33 @@ type
     FBuffers: TList; // has both used and unused buffers
     FBufferList: TPAFifoList; // only has available buffers
     FWaitList: TPAFifoList;
+    FTargetCount: Integer; // how many buffers the pool should own (sum of live
+                           // managers' counts); returns above this are freed, not
+                           // pooled, so the pool can't grow across chains.
     function CheckWaitFor(ABuffer: PAudioBuffer): Boolean;
     procedure WriteAvailBuffers;
     function BufferInPool(ABuf: PAudioBuffer): Boolean;
   public
     procedure AllocateBuffers(ACount: Integer);
+    // Remove up to ACount currently-free buffers from the pool and release their
+    // memory. Called when a buffer manager is destroyed so the global (shared,
+    // singleton) pool stays balanced: without it every chain we build adds
+    // ACount buffers that are never reclaimed, so opening song after song grows
+    // the pool unbounded -- which weakens back-pressure and lets passthrough
+    // links (the FFT analyser) race ahead of playback, flooding/dropping frames.
+    procedure DeallocateBuffers(ACount: Integer);
     procedure FreeBuffers;
-    function  GetBufferFromPool(AWait: Boolean = True): PAudioBuffer;
+    // APump, if given, is called while blocked waiting for a buffer. A producer
+    // can block here mid-InternalProcessData while output it already produced is
+    // still queued (as PAM_SendBuffer) on its own message queue, undelivered --
+    // so the destination starves and never returns a buffer. APump is the
+    // caller's FlushPendingSends, which delivers that queued output so the
+    // destination can drain it and return buffers. Without it the blocking pool
+    // deadlocks (blocked producer <-> starved consumer).
+    function  GetBufferFromPool(AWait: Boolean = True; APump: TThreadMethod = nil): PAudioBuffer;
     procedure ReturnBufferToPool(ABuffer: PAudioBuffer);
+    function  TotalBufferCount: Integer; // all buffers the pool owns (used + free)
+    function  FreeBufferCount: Integer;  // buffers currently available
     constructor Create;
     destructor Destroy; override;
   end;
@@ -495,11 +528,15 @@ end;
 
 { TPABufferMessage }
 
-constructor TPABufferMessage.Create(ABuffer: PAudioBuffer; ADest: IPAAudioDestination);
+constructor TPABufferMessage.Create(ABuffer: PAudioBuffer; const ADests: array of IPAAudioDestination);
+var
+  i: Integer;
 begin
   inherited Create(PAM_SendBuffer);
   Buffer:=ABuffer;
-  Dest := ADest;
+  SetLength(Dests, Length(ADests));
+  for i := 0 to High(ADests) do
+    Dests[i] := ADests[i];
 end;
 
 destructor TPABufferMessage.Destroy;
@@ -604,6 +641,13 @@ var
 begin
   //WriteLn('Allocating Buffers: ', ACount);
 
+    EnterCriticalsection(FCrit);
+    try
+      Inc(FTargetCount, ACount); // this manager's share of the shared pool
+    finally
+      LeaveCriticalsection(FCrit);
+    end;
+
     for I := 0 to ACount-1 do begin
       Buf := GetMem(SizeOF(TAudioBuffer));
       FillChar(Buf^, SizeOf(TAudioBuffer), 0); // make sure it's zero
@@ -619,37 +663,102 @@ begin
 
 end;
 
+procedure TPABufferPool.DeallocateBuffers(ACount: Integer);
+var
+  Buf: Pointer;
+begin
+  EnterCriticalsection(FCrit);
+  try
+    // Lower the target by this manager's share. At teardown most of its buffers
+    // are still in flight (not free yet), so we can only reclaim what is free
+    // right now; the rest are over-target and get freed in ReturnBufferToPool as
+    // they trickle back. This is what keeps the pool (and its free list) bounded.
+    Dec(FTargetCount, ACount);
+    if FTargetCount < 0 then
+      FTargetCount := 0;
+    while (FBuffers.Count > FTargetCount) and (FBufferList.Count > 0) do
+    begin
+      Buf := FBufferList.GetItem; // take one off the available (free) list
+      if Buf = nil then
+        Break;
+      FBuffers.Remove(Buf);       // drop it from the master list too...
+      FreeMem(Buf);               // ...and release its memory
+    end;
+  finally
+    LeaveCriticalsection(FCrit);
+  end;
+end;
+
 procedure TPABufferPool.FreeBuffers;
 begin
   // :)
 end;
 
-function TPABufferPool.GetBufferFromPool(AWait: Boolean = True): PAudioBuffer;
+function TPABufferPool.GetBufferFromPool(AWait: Boolean = True; APump: TThreadMethod = nil): PAudioBuffer;
+var
+  WaitEvent: TPABufferEvent;
+  Res: TWaitResult;
 begin
+  // Block when the pool is exhausted -- this blocking IS the chain's global
+  // back-pressure: a producer waits here until the realtime sink returns a
+  // buffer, which paces the whole pipeline to playback. Growing the pool on
+  // demand instead removed that pacing entirely, so sources/links raced the
+  // whole song into the sink's buffer ahead of time (the VU meter finished
+  // while audio kept playing).
+  //
+  // Check the free list and register a waiter atomically, so a concurrent
+  // ReturnBufferToPool can't slip a buffer into the list past our waiter.
   EnterCriticalsection(FCrit);
   try
     Result := PAudioBuffer(FBufferList.GetItem); // can return nil
     if Assigned(Result) or not AWait then
       Exit;
-
-    // The free list is empty. A fixed pool deadlocks any rate-changing link
-    // (resampler/samplerate): such a link holds a partially filled output
-    // buffer across InternalProcessData calls while the source keeps filling
-    // its input queue, so every pool buffer ends up in flight and none is ever
-    // returned. The source then blocks writing to the full input queue, the
-    // link blocks here waiting for an output buffer, and the destination
-    // starves -- a permanent three-way deadlock.
-    //
-    // Grow the pool on demand instead of blocking. FBuffers owns the buffer for
-    // cleanup at shutdown; once the chain drains it it returns to the free list
-    // via ReturnBufferToPool and is recycled. Per-stage backpressure still
-    // bounds memory via each TPAAudioBufferManager's queue limit.
-    Result := GetMem(SizeOf(TAudioBuffer));
-    FillChar(Result^, SizeOf(TAudioBuffer), 0);
-    FBuffers.Add(Result);
+    WaitEvent := TPABufferEvent.Create;
+    WaitEvent.ResetEvent;
+    FWaitList.AddObject(WaitEvent);
   finally
     LeaveCriticalsection(FCrit);
   end;
+
+  repeat
+    // Deliver any output we're already holding so the destination can drain it
+    // and return a buffer (which may be handed straight to our WaitEvent). Pump
+    // first, then wait on a short timeout so a freed buffer is picked up fast.
+    if Assigned(APump) then
+      APump;
+    Res := WaitEvent.WaitFor(100);
+    if Res = wrSignaled then
+    begin
+      // CheckWaitFor dequeued our event and handed it a returned buffer.
+      Result := WaitEvent.Buffer;
+      FreeAndNil(WaitEvent);
+      Break;
+    end;
+
+    // Timed out: decide atomically vs ReturnBufferToPool whether we were just
+    // handed a buffer, otherwise self-service from the list.
+    EnterCriticalsection(FCrit);
+    try
+      if WaitEvent.IsSet then
+      begin
+        Result := WaitEvent.Buffer;
+        FreeAndNil(WaitEvent);
+      end
+      else
+      begin
+        Result := PAudioBuffer(FBufferList.GetItem);
+        if Assigned(Result) then
+        begin
+          // Grabbed our own buffer; flag the event so a returner disposes it
+          // instead of handing it a buffer (which would orphan that buffer).
+          WaitEvent.Buffer := nil;
+          WaitEvent.OwnerDestroyed := True;
+        end;
+      end;
+    finally
+      LeaveCriticalsection(FCrit);
+    end;
+  until Assigned(Result);
 end;
 
 procedure TPABufferPool.ReturnBufferToPool(ABuffer: PAudioBuffer);
@@ -665,8 +774,40 @@ begin
   try
     if BufferInPool(ABuffer) then
       Raise Exception.Create('Buffer already in pool!');
+    // A live waiter takes priority -- it needs a buffer now, even if we're over
+    // target. Otherwise: if the pool currently owns more buffers than it should
+    // (a chain was torn down and its buffers are trickling back), reclaim this
+    // one instead of pooling it; this is how the deferred shrink completes.
     if not CheckWaitFor(ABuffer) then
-      FBufferList.AddItem(ABuffer);
+    begin
+      if FBuffers.Count > FTargetCount then
+      begin
+        FBuffers.Remove(ABuffer);
+        FreeMem(ABuffer);
+      end
+      else
+        FBufferList.AddItem(ABuffer);
+    end;
+  finally
+    LeaveCriticalsection(FCrit);
+  end;
+end;
+
+function TPABufferPool.TotalBufferCount: Integer;
+begin
+  EnterCriticalsection(FCrit);
+  try
+    Result := FBuffers.Count;
+  finally
+    LeaveCriticalsection(FCrit);
+  end;
+end;
+
+function TPABufferPool.FreeBufferCount: Integer;
+begin
+  EnterCriticalsection(FCrit);
+  try
+    Result := FBufferList.Count;
   finally
     LeaveCriticalsection(FCrit);
   end;
@@ -719,9 +860,22 @@ begin
 end;
 
 destructor TPAAudioBufferManager.Destroy;
+var
+  B: PAudioBuffer;
 begin
+  // Return any buffers still queued in this manager to the pool, otherwise they
+  // leak (the FIFO list object is freed but the buffers inside it are not), and
+  // DeallocateBuffers below would have fewer free buffers to reclaim.
+  repeat
+    B := PAudioBuffer(FBuffers.GetItem);
+    if B <> nil then
+      BufferPool.ReturnBufferToPool(B);
+  until B = nil;
   FBuffers.Free;
   FBufferUsed.Free;
+  // We added FBufferCount buffers to the shared pool in Create; reclaim that many
+  // now so the pool doesn't grow every time a chain is built and torn down.
+  BufferPool.DeallocateBuffers(FBufferCount);
   inherited Destroy;
 end;
 
@@ -941,7 +1095,9 @@ end;
 
 constructor TPAAudioDestination.Create;
 begin
-  FBufferManager := TPAAudioBufferManager.Create(Self, 4, False);
+  // 2 buffers is enough under the back-pressured pull model: one being processed
+  // while the next is queued. The pool stays balanced (see DeallocateBuffers).
+  FBufferManager := TPAAudioBufferManager.Create(Self, 2, False);
   inherited Create;
 end;
 
@@ -1105,16 +1261,13 @@ begin
         end;
       PAM_SendBuffer:
         begin
-          if not BufferMessage.Dest.WriteBuffer(BufferMessage.Buffer) then
+          if not DeliverBufferMessage(BufferMessage) then
           begin
-           // make sure this is sent before we process more data
-           // insert message before other data messages but after other messages like PAM_ObjectIsDestroying
-           //WriteLn('Couldn''t send buffer re-queing it');
+           // a destination's queue was full. Retry before processing more data,
+           // but after higher-priority messages like PAM_ObjectIsDestroying.
            FMsgQueue.InsertBefore([PAM_Data, PAM_SendBuffer, PAM_DataEnd], Msg);
-           Msg := nil; // to avoid freeing since it's back in the queue
-          end
-          else
-            BufferMessage.Buffer:=nil; // otherwise when the message is freed it will return the buffer to the pool
+           Msg := nil; // back in the queue; don't free it
+          end;
         end;
       else
         // it is a message specific for the child to choose to handle
@@ -1151,11 +1304,11 @@ var
   Res: TWaitResult;
 begin
   if FDestBuf = nil then
-    FDestBuf:= BufferPool.GetBufferFromPool(True)
+    FDestBuf:= BufferPool.GetBufferFromPool(True, @FlushPendingSends)
   else if FDestBuf^.UsedData = AUDIO_BUFFER_SIZE then
   begin
     WriteToDestinations(FDestBuf);
-    FDestBuf := BufferPool.GetBufferFromPool(True);
+    FDestBuf := BufferPool.GetBufferFromPool(True, @FlushPendingSends);
   end;
   //WriteLn(ClassName,' got buffer');
 end;
@@ -1236,18 +1389,13 @@ begin
         end;
       PAM_SendBuffer:
         begin
-          //WriteLn(ClassName, ' writing buffer to dest from message');
-
-          if not BufferMessage.Dest.WriteBuffer(BufferMessage.Buffer) then
+          if not DeliverBufferMessage(BufferMessage) then
           begin
-           // make sure this is sent before we process more data
-           // insert message before other data messages but after other messages like PAM_ObjectIsDestroying
-           //WriteLn('Couldn''t send buffer re-queing it');
+           // a destination's queue was full. Retry before processing more data,
+           // but after higher-priority messages like PAM_ObjectIsDestroying.
            FMsgQueue.InsertBefore([PAM_Data, PAM_SendBuffer, PAM_DataEnd], Msg);
-           Msg := nil; // to avoid freeing since it's back in the queue
-          end
-          else
-            BufferMessage.Buffer:=nil; // otherwise when the message is freed it will return the buffer to the pool
+           Msg := nil; // back in the queue; don't free it
+          end;
         end;
       else
         // it is a message specific for the child to choose to handle
@@ -1317,8 +1465,7 @@ end;
 procedure TPAAudioSource.WriteToDestinations(const ABuffer: PAudioBuffer);
 var
   i: Integer;
-  Buf: PAudioBuffer;
-  Msg: TPABufferMessage;
+  Dests: array of IPAAudioDestination;
 begin
   //WriteLn(ClassName, ' writing buffer to dests');
 
@@ -1333,18 +1480,92 @@ begin
   // mark the type of data in the buffer.
   ABuffer^.Format:=FFormat;
 
-  //WriteLn('Writing to dest');
-  for i := 1 to FDestinations.Count-1 do
-  begin
-    // when we write buffers then it owns the buffer so each destination needs a copy except the first
-    Buf := BufferPool.GetBufferFromPool(True);
-    Buf^  := ABuffer^;
+  // Post a single send message with the buffer and a snapshot of the wanted
+  // destinations. This is just the hand-off -- it never copies and never touches
+  // the pool, so a producer can't block here mid-output. The worker thread does
+  // the fan-out (and any copy for >1 destination) when it processes the message.
+  SetLength(Dests, FDestinations.Count);
+  for i := 0 to FDestinations.Count - 1 do
+    Dests[i] := IPAAudioDestination(FDestinations[i]);
 
-    Msg := TPABufferMessage.Create(Buf, IPAAudioDestination(FDestinations[i]));
-    FMsgQueue.PostMessage(Msg);
+  FMsgQueue.PostMessage(TPABufferMessage.Create(ABuffer, Dests));
+end;
+
+procedure TPAAudioSource.FlushPendingSends;
+var
+  Msg: TPAIOMessage;
+  Held: TList;
+  i: Integer;
+begin
+  // Drain our queue once: deliver PAM_SendBuffer messages, hold everything else
+  // untouched and in order. Must NOT process PAM_Data (that would produce more
+  // output and re-enter GetBufferFromPool). Runs on our own worker thread, so no
+  // one else pops; concurrent posts only append and stay after the held ones.
+  Held := TList.Create;
+  try
+    while FMsgQueue.HasMessage do
+    begin
+      Msg := FMsgQueue.PopMessage;
+      if Msg = nil then
+        Break;
+      if Msg.Message = PAM_SendBuffer then
+      begin
+        if DeliverBufferMessage(TPABufferMessage(Msg)) then
+          Msg.Free                 // fully delivered
+        else
+          Held.Add(Msg);           // a destination was full -- retry in order
+      end
+      else
+        Held.Add(Msg);
+    end;
+    for i := Held.Count - 1 downto 0 do
+      FMsgQueue.InsertMessage(TPAIOMessage(Held[i]));
+  finally
+    Held.Free;
   end;
-  Msg := TPABufferMessage.Create(ABuffer, IPAAudioDestination(FDestinations[0]));
-  FMsgQueue.PostMessage(Msg);
+end;
+
+function TPAAudioSource.DeliverBufferMessage(AMsg: TPABufferMessage): Boolean;
+var
+  Dst: IPAAudioDestination;
+  SendBuf: PAudioBuffer;
+  IsLast: Boolean;
+  i: Integer;
+begin
+  // Deliver to each remaining destination in turn. The final one is handed the
+  // original buffer; any earlier ones get a fresh copy (so a copy happens only
+  // with real fan-out). On a full destination we stop and report not-done so the
+  // caller re-queues us with whatever destinations are left.
+  while Length(AMsg.Dests) > 0 do
+  begin
+    Dst := AMsg.Dests[0];
+    IsLast := Length(AMsg.Dests) = 1;
+    if IsLast then
+      SendBuf := AMsg.Buffer
+    else
+    begin
+      SendBuf := BufferPool.GetBufferFromPool(True);
+      SendBuf^ := AMsg.Buffer^;
+    end;
+
+    if Dst.WriteBuffer(SendBuf) then
+    begin
+      if IsLast then
+        AMsg.Buffer := nil; // original handed off; don't return it when freed
+      // drop the delivered destination from the front of the list
+      for i := 1 to High(AMsg.Dests) do
+        AMsg.Dests[i - 1] := AMsg.Dests[i];
+      SetLength(AMsg.Dests, Length(AMsg.Dests) - 1);
+    end
+    else
+    begin
+      // destination full: discard the unused copy and ask to be re-queued.
+      if not IsLast then
+        BufferPool.ReturnBufferToPool(SendBuf);
+      Exit(False);
+    end;
+  end;
+  Result := True;
 end;
 
 function TPAAudioInformationBase.GetSamplesPerSecond: Integer;
@@ -1497,6 +1718,19 @@ end;
 destructor TPAAudioSource.Destroy;
 begin
   DestroyWaitSync;
+  // Return the partially-filled buffer we were still accumulating into. On a
+  // normal end-of-data SignalDestinationsDone flushes and nils it, but when the
+  // source is freed mid-stream (e.g. the user loads another song) it's still
+  // held here -- without this it leaks from the pool every time.
+  if Assigned(FDestBuf) then
+  begin
+    BufferPool.ReturnBufferToPool(FDestBuf);
+    FDestBuf := nil;
+  end;
+  // Create added 1 buffer to the shared pool (for FDestBuf); reclaim it so the
+  // pool stays balanced. Applies to every source AND link (TPAAudioLink derives
+  // from TPAAudioSource), so each chain returns exactly what it added.
+  BufferPool.DeallocateBuffers(1);
   FDestinations.Free;
   inherited Destroy;
 end;
@@ -1527,7 +1761,10 @@ end;
 constructor TPAAudioLink.Create;
 begin
   InitCriticalSection(FCrit);
-  FBufferManager := TPAAudioBufferManager.Create(Self, 6, False);
+  // 2 incoming buffers as a destination; inherited TPAAudioSource.Create adds 1
+  // for the link's own output accumulator. Lean but deadlock-free under the
+  // back-pressured pull model.
+  FBufferManager := TPAAudioBufferManager.Create(Self, 2, False);
   inherited Create;
 end;
 

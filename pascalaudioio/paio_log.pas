@@ -213,7 +213,9 @@ end;
 
 initialization
   InitCriticalSection(TPALog.FLock);
-  TPALog.FMinLevel := llInfo;
+  // default to Warning so routine "initialized" Info chatter stays off the
+  // console; apps that want it can call TPALog.MinLevel := llInfo (or llDebug).
+  TPALog.FMinLevel := llWarning;
 
 finalization
   DoneCriticalSection(TPALog.FLock);

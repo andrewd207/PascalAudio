@@ -13,17 +13,18 @@
 }
 
 { TPAFFTLink is a middle link that forwards audio unchanged and, as data flows
-  through, computes a Hann-windowed FFT and emits a magnitude spectrum via
-  OnSpectrum. Intended for spectrum analysers / VU-style bar meters.
+  through, computes a Hann-windowed FFT spectrum.
 
-  Set BandCount to 0 to receive the full FFT magnitude spectrum (DC..Nyquist).
-  Set it to a value in [8..128] to receive that many log-spaced bands instead,
-  which is what a bar meter with a fixed number of bars wants.
+  A new spectrum ("frame") is produced every FrameIntervalMS of *audio* (a
+  sliding window with that hop), independent of how the audio buffers actually
+  arrive. Frames are pushed into a thread-safe FIFO; the consumer PULLS them
+  with PullFrame at whatever rate it likes (typically a GUI timer) and decides
+  itself when to drop frames if it is falling behind (drain the FIFO, or check
+  BufferedFrameCount). The FIFO is capped at MaxBufferedFrames so it can never
+  grow without bound if nothing pulls.
 
-  The result is marshalled to the main thread (via Queue) and coalesced, so the
-  handler is GUI-safe and won't be flooded when FFT frames arrive faster than
-  the GUI can draw. As with every queued event in the suite, the main thread
-  must pump the synchronize queue (CheckSynchronize or an LCL/fpGUI loop). }
+  Set BandCount to 0 to get the full FFT magnitude spectrum (DC..Nyquist), or
+  8..128 to get that many log-spaced band energies (what a bar meter wants). }
 
 unit pa_fft;
 
@@ -46,13 +47,6 @@ type
     fcmPerChannel     // one spectrum per source channel
   );
 
-  // AMagnitudes holds either the full FFT bins (DC..Nyquist) when BandCount = 0,
-  // or BandCount log-spaced band energies when BandCount > 0. AChannel is the
-  // spectrum index (0 for mono/first-channel modes, the source channel for
-  // per-channel mode).
-  TPAFFTSpectrumEvent = procedure(Sender: TObject; const AMagnitudes: array of Single;
-    AChannel: Integer; ASampleRate: Integer) of object;
-
   { TPAFFTLink }
 
   TPAFFTLink = class(TPAAudioLink)
@@ -60,52 +54,85 @@ type
     FWindowSize: Integer;
     FBandCount: Integer;
     FMode: TPAFFTChannelMode;
-    FOnSpectrum: TPAFFTSpectrumEvent;
+    FFrameIntervalMS: Integer;
+    FMaxBufferedFrames: Integer;
 
     FNeedInit: Boolean;
     FFFT: TPAIOFFT;
     FBins: Integer;           // FFT bins produced (DC..Nyquist)
     FOutCount: Integer;       // values we emit: FBins, or FBandCount when banding
-    FSrcChannels: Integer;       // source channel count, captured at init
+    FSrcChannels: Integer;    // source channel count, captured at init
+    FSrcFormat: TPAAudioFormat; // source sample format, captured at init
     FRate: Integer;
     FTargets: Integer;        // number of spectra we emit
+    FHopSamples: Integer;     // samples of audio between emitted frames
 
     // worker-thread scratch (touched only inside InternalProcessData)
     FWindow: array of Single;             // Hann window, length FWindowSize
-    FFill: array of array of Single;      // [target] accumulation buffers
-    FFillPos: array of Integer;           // [target] samples accumulated
+    FFill: array of array of Single;      // [target] sliding ring of last samples
+    FFillPos: array of Integer;           // [target] ring write position
+    FFilled: array of Integer;            // [target] samples seen (capped at window)
+    FHopAccum: array of Integer;          // [target] samples since last emit
     FWinBuf: array of Single;             // windowed frame fed to the FFT
     FTmpMag: array of Single;             // raw FFT magnitudes (FBins)
     FTmpOut: array of Single;             // emitted values (FOutCount)
     FBandLo: array of Integer;            // [band] first bin (inclusive)
     FBandHi: array of Integer;            // [band] last bin (inclusive)
 
-    // shared between worker and main thread, guarded by FCrit
-    FCrit: TRTLCriticalSection;
-    FMag: array of array of Single;       // [target] latest emitted values
-    FReady: array of Boolean;             // [target] fresh spectrum pending
-    FQueued: Boolean;                     // a DispatchSpectra is already queued
+    // frame FIFO, shared between worker (push) and consumer (pull)
+    FFrameCrit: TRTLCriticalSection;
+    FFrameChan: array of Integer;         // parallel FIFO arrays
+    FFrameMag: array of array of Single;
+    FFrameHead, FFrameCount: Integer;     // ring indices into the FIFO arrays
 
     procedure SetWindowSize(AValue: Integer);
     procedure SetBandCount(AValue: Integer);
     procedure SetMode(AValue: TPAFFTChannelMode);
+    procedure SetFrameIntervalMS(AValue: Integer);
+    procedure SetMaxBufferedFrames(AValue: Integer);
+    procedure ComputeHop;
     procedure InitData;
     procedure BuildBands;
     procedure PushSample(ATarget: Integer; AValue: Single);
     procedure ComputeAndDeliver(ATarget: Integer);
-    procedure DispatchSpectra; // runs on the main thread
+    procedure PushFrame(AChannel: Integer);     // worker: enqueue FTmpOut
+    procedure ClearFrames;
   protected
     function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; override;
-    function  GetFormat: TPAAudioFormat; override; // force float32 input
+    // Report the SOURCE's format so the framework does NOT convert data before
+    // handing it to us -- keeps this a true passthrough (no S16->float32
+    // doubling). We convert to float locally for the FFT.
+    function  GetFormat: TPAAudioFormat; override;
   public
     constructor Create; override;
     destructor  Destroy; override;
+
+    // Pop the oldest buffered frame. Call from your own timer at whatever rate
+    // you want. Returns False when nothing is buffered, leaving AMagnitudes /
+    // AChannel untouched (var, not out -- so `while PullFrame(c,m) do ...; use m`
+    // keeps the last frame). On success AMagnitudes is sized to the number of
+    // values (BinCount, or BandCount when banding); AChannel is the spectrum
+    // index (0 for mono/first, source channel for per-channel).
+    function  PullFrame(var AChannel: Integer; var AMagnitudes: TSingleArray): Boolean;
+    // How many frames are waiting. Use it to drop when you're behind, e.g.
+    //   while BufferedFrameCount > 2 do PullFrame(c, m); // skip stale frames
+    function  BufferedFrameCount: Integer;
+
     // power of two, minimum 8 (2^3); set before audio starts flowing
     property WindowSize: Integer read FWindowSize write SetWindowSize;
     // 0 = full FFT spectrum; otherwise number of log-spaced bands (8..128)
     property BandCount: Integer read FBandCount write SetBandCount;
     property ChannelMode: TPAFFTChannelMode read FMode write SetMode;
-    property OnSpectrum: TPAFFTSpectrumEvent read FOnSpectrum write FOnSpectrum;
+    // Audio time between frames, in milliseconds: one spectrum is produced for
+    // every FrameIntervalMS of audio, regardless of buffering. 0 (default) means
+    // one frame per window (no overlap). Values smaller than the window duration
+    // overlap; larger ones skip audio between frames.
+    property FrameIntervalMS: Integer read FFrameIntervalMS write SetFrameIntervalMS;
+    // FIFO cap: oldest frames are dropped past this so the buffer can't grow
+    // unbounded if the consumer stops pulling. Default 64.
+    property MaxBufferedFrames: Integer read FMaxBufferedFrames write SetMaxBufferedFrames;
+    // source sample rate (for mapping bins to Hz); valid once audio is flowing
+    property SampleRate: Integer read FRate;
   end;
 
 implementation
@@ -118,24 +145,21 @@ uses
 constructor TPAFFTLink.Create;
 begin
   inherited Create;
-  InitCriticalSection(FCrit);
-  // we hand float32 downstream (GetFormat forces input conversion), so tag our
-  // output as float32 too -- WriteToDestinations stamps buffers with this.
-  Format := afFloat32;
+  InitCriticalSection(FFrameCrit);
   FWindowSize := 1024;
   FBandCount := 0;
   FMode := fcmMixToMono;
+  FFrameIntervalMS := 0;
+  FMaxBufferedFrames := 64;
   FNeedInit := True;
 end;
 
 destructor TPAFFTLink.Destroy;
 begin
-  // stop the worker thread (it uses FFFT/buffers) before tearing them down,
-  // and drop any spectrum dispatch still queued for the main thread.
+  // stop the worker thread (it uses FFFT/buffers) before tearing them down.
   DestroyWaitSync;
-  TThread.RemoveQueuedEvents(Self);
   FFFT.Free;
-  DoneCriticalSection(FCrit);
+  DoneCriticalSection(FFrameCrit);
   inherited Destroy;
 end;
 
@@ -170,9 +194,35 @@ begin
   FNeedInit := True;
 end;
 
+procedure TPAFFTLink.SetFrameIntervalMS(AValue: Integer);
+begin
+  if AValue < 0 then
+    AValue := 0;
+  FFrameIntervalMS := AValue;
+  ComputeHop; // applies immediately (only changes the hop)
+end;
+
+procedure TPAFFTLink.SetMaxBufferedFrames(AValue: Integer);
+begin
+  if AValue < 1 then
+    AValue := 1;
+  FMaxBufferedFrames := AValue;
+end;
+
+procedure TPAFFTLink.ComputeHop;
+begin
+  if (FFrameIntervalMS <= 0) or (FRate <= 0) then
+    FHopSamples := FWindowSize          // one frame per window (no overlap)
+  else
+    FHopSamples := Max(1, Round(FFrameIntervalMS * FRate / 1000.0));
+end;
+
 function TPAFFTLink.GetFormat: TPAAudioFormat;
 begin
-  Result := afFloat32;
+  if Assigned(DataSource) and (DataSource.GetSourceObject is IPAAudioInformation) then
+    Result := (DataSource.GetSourceObject as IPAAudioInformation).GetFormat
+  else
+    Result := inherited GetFormat;
 end;
 
 procedure TPAFFTLink.BuildBands;
@@ -216,6 +266,10 @@ begin
   if FSrcChannels < 1 then
     FSrcChannels := 1;
   FRate := SamplesPerSecond;
+  // Forward in the source's own format (true passthrough). Pin the field
+  // WriteToDestinations stamps onto buffers. We convert to float locally.
+  FSrcFormat := Format;
+  SetFormat(FSrcFormat);
 
   if FMode = fcmPerChannel then
     FTargets := FSrcChannels
@@ -234,6 +288,8 @@ begin
   else
     FOutCount := FBins;
 
+  ComputeHop;
+
   // Hann window
   SetLength(FWindow, FWindowSize);
   for i := 0 to FWindowSize - 1 do
@@ -245,45 +301,45 @@ begin
 
   SetLength(FFill, FTargets);
   SetLength(FFillPos, FTargets);
+  SetLength(FFilled, FTargets);
+  SetLength(FHopAccum, FTargets);
   for i := 0 to FTargets - 1 do
   begin
     SetLength(FFill[i], FWindowSize);
     FFillPos[i] := 0;
+    FFilled[i] := 0;
+    FHopAccum[i] := 0;
   end;
 
-  EnterCriticalSection(FCrit);
-  try
-    SetLength(FMag, FTargets);
-    SetLength(FReady, FTargets);
-    for i := 0 to FTargets - 1 do
-    begin
-      SetLength(FMag[i], FOutCount);
-      FReady[i] := False;
-    end;
-    FQueued := False;
-  finally
-    LeaveCriticalSection(FCrit);
-  end;
+  ClearFrames;
 end;
 
 procedure TPAFFTLink.PushSample(ATarget: Integer; AValue: Single);
 begin
+  // sliding ring of the most recent FWindowSize samples
   FFill[ATarget][FFillPos[ATarget]] := AValue;
-  Inc(FFillPos[ATarget]);
-  if FFillPos[ATarget] = FWindowSize then
+  FFillPos[ATarget] := (FFillPos[ATarget] + 1) mod FWindowSize;
+  if FFilled[ATarget] < FWindowSize then
+    Inc(FFilled[ATarget]);
+  Inc(FHopAccum[ATarget]);
+  // emit once we have a full window and FHopSamples of audio have passed
+  if (FFilled[ATarget] >= FWindowSize) and (FHopAccum[ATarget] >= FHopSamples) then
   begin
-    FFillPos[ATarget] := 0;
+    Dec(FHopAccum[ATarget], FHopSamples);
     ComputeAndDeliver(ATarget);
   end;
 end;
 
 procedure TPAFFTLink.ComputeAndDeliver(ATarget: Integer);
 var
-  i, b: Integer;
+  i, b, oldest: Integer;
   energy: Single;
 begin
+  // copy the ring out in chronological order (oldest sample is at FFillPos), and
+  // apply the window.
+  oldest := FFillPos[ATarget];
   for i := 0 to FWindowSize - 1 do
-    FWinBuf[i] := FFill[ATarget][i] * FWindow[i];
+    FWinBuf[i] := FFill[ATarget][(oldest + i) mod FWindowSize] * FWindow[i];
 
   FFFT.ForwardReal(@FWinBuf[0], @FTmpMag[0]);
 
@@ -302,88 +358,129 @@ begin
     for i := 0 to FOutCount - 1 do
       FTmpOut[i] := FTmpMag[i];
 
-  EnterCriticalSection(FCrit);
+  PushFrame(ATarget);
+end;
+
+procedure TPAFFTLink.PushFrame(AChannel: Integer);
+var
+  cap, idx, i: Integer;
+begin
+  EnterCriticalSection(FFrameCrit);
   try
-    for i := 0 to FOutCount - 1 do
-      FMag[ATarget][i] := FTmpOut[i];
-    FReady[ATarget] := True;
-    if not FQueued then
+    cap := Length(FFrameChan);
+    if cap = 0 then
+      Exit; // not allocated yet (shouldn't happen post-init)
+    if FFrameCount >= FMaxBufferedFrames then
     begin
-      FQueued := True;
-      Queue(@DispatchSpectra);
+      // FIFO full: drop the oldest frame to make room.
+      FFrameHead := (FFrameHead + 1) mod cap;
+      Dec(FFrameCount);
     end;
+    idx := (FFrameHead + FFrameCount) mod cap;
+    FFrameChan[idx] := AChannel;
+    SetLength(FFrameMag[idx], FOutCount);
+    for i := 0 to FOutCount - 1 do
+      FFrameMag[idx][i] := FTmpOut[i];
+    Inc(FFrameCount);
   finally
-    LeaveCriticalSection(FCrit);
+    LeaveCriticalSection(FFrameCrit);
   end;
 end;
 
-procedure TPAFFTLink.DispatchSpectra;
+function TPAFFTLink.PullFrame(var AChannel: Integer; var AMagnitudes: TSingleArray): Boolean;
 var
-  snap: array of array of Single;
-  pending: array of Boolean;
-  rate, n, ch: Integer;
+  cap: Integer;
 begin
-  EnterCriticalSection(FCrit);
+  Result := False;
+  EnterCriticalSection(FFrameCrit);
   try
-    n := FTargets;
-    rate := FRate;
-    SetLength(snap, n);
-    SetLength(pending, n);
-    for ch := 0 to n - 1 do
-    begin
-      pending[ch] := FReady[ch];
-      if FReady[ch] then
-      begin
-        snap[ch] := Copy(FMag[ch], 0, FOutCount);
-        FReady[ch] := False;
-      end;
-    end;
-    FQueued := False;
-  finally
-    LeaveCriticalSection(FCrit);
-  end;
+    if FFrameCount = 0 then
+      Exit; // leave AChannel/AMagnitudes as the caller had them
 
-  if not Assigned(FOnSpectrum) then
-    Exit;
-  for ch := 0 to n - 1 do
-    if pending[ch] then
-      FOnSpectrum(Self, snap[ch], ch, rate);
+    cap := Length(FFrameChan);
+    AChannel := FFrameChan[FFrameHead];
+    AMagnitudes := Copy(FFrameMag[FFrameHead], 0, Length(FFrameMag[FFrameHead]));
+    FFrameHead := (FFrameHead + 1) mod cap;
+    Dec(FFrameCount);
+    Result := True;
+  finally
+    LeaveCriticalSection(FFrameCrit);
+  end;
+end;
+
+function TPAFFTLink.BufferedFrameCount: Integer;
+begin
+  EnterCriticalSection(FFrameCrit);
+  Result := FFrameCount;
+  LeaveCriticalSection(FFrameCrit);
+end;
+
+procedure TPAFFTLink.ClearFrames;
+begin
+  EnterCriticalSection(FFrameCrit);
+  try
+    // ring sized one larger than the cap so head/tail never collide
+    SetLength(FFrameChan, FMaxBufferedFrames + 1);
+    SetLength(FFrameMag, FMaxBufferedFrames + 1);
+    FFrameHead := 0;
+    FFrameCount := 0;
+  finally
+    LeaveCriticalSection(FFrameCrit);
+  end;
 end;
 
 function TPAFFTLink.InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64;
 var
-  Samples: PSingle;
+  B: PAudioBuffer;
+  pf: PSingle;
+  ps: PSmallInt;
   frames, f, c, base: Integer;
   acc: Single;
+
+  function Sample(AIndex: Integer): Single; inline;
+  begin
+    if FSrcFormat = afFloat32 then
+      Result := pf[AIndex]
+    else
+      Result := ps[AIndex] * (1.0 / 32768.0); // afS16
+  end;
+
 begin
   if FNeedInit then
     InitData;
 
-  // 1) forward the data downstream unchanged (passthrough). Use WriteToBuffer,
-  // which chunks into AUDIO_BUFFER_SIZE pieces -- a single pooled buffer is only
-  // AUDIO_BUFFER_SIZE bytes, and ACount can exceed that (e.g. when the framework
-  // up-converts S16->float32 before calling us), so a raw Move would overflow.
-  WriteToBuffer(AData, ACount, AIsLastData);
+  // 1) forward the data downstream unchanged (true passthrough, native format).
+  B := BufferPool.GetBufferFromPool(True, @FlushPendingSends);
+  B^.Format      := Format;
+  B^.UsedData    := ACount;
+  B^.IsEndOfData := AIsLastData;
+  Move(AData, B^.Data, ACount);
+  WriteToDestinations(B);
 
-  // 2) feed the analyser. Data is float32 (GetFormat forces conversion).
-  Samples := PSingle(@AData);
-  frames := (ACount div SizeOf(Single)) div FSrcChannels;
-  for f := 0 to frames - 1 do
+  // 2) feed the analyser, converting to float locally. Only PCM formats can be
+  // analysed; skip encoded (afRaw) data.
+  if FSrcFormat in [afS16, afFloat32] then
   begin
-    base := f * FSrcChannels;
-    case FMode of
-      fcmFirstChannel:
-        PushSample(0, Samples[base]);
-      fcmPerChannel:
-        for c := 0 to FSrcChannels - 1 do
-          PushSample(c, Samples[base + c]);
-      else // fcmMixToMono
-        begin
-          acc := 0;
+    pf := PSingle(@AData);
+    ps := PSmallInt(@AData);
+    frames := (ACount div BytesPerSample(FSrcFormat)) div FSrcChannels;
+    for f := 0 to frames - 1 do
+    begin
+      base := f * FSrcChannels;
+      case FMode of
+        fcmFirstChannel:
+          PushSample(0, Sample(base));
+        fcmPerChannel:
           for c := 0 to FSrcChannels - 1 do
-            acc := acc + Samples[base + c];
-          PushSample(0, acc / FSrcChannels);
-        end;
+            PushSample(c, Sample(base + c));
+        else // fcmMixToMono
+          begin
+            acc := 0;
+            for c := 0 to FSrcChannels - 1 do
+              acc := acc + Sample(base + c);
+            PushSample(0, acc / FSrcChannels);
+          end;
+      end;
     end;
   end;
 

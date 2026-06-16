@@ -37,6 +37,7 @@ type
   private
     FStream: TPulseAsyncStream;
     FInited: Boolean;
+    FLatencyMS: LongWord;
     procedure Init;
     procedure DeInit;
   protected
@@ -44,6 +45,10 @@ type
   public
     constructor Create; override;
     destructor Destroy; override;
+    // Cap the PulseAudio buffer to ~this many ms so playback stays close to the
+    // data being fed (paces the whole chain to real time). 0 (default) uses the
+    // server's large default buffer. Set before playback starts.
+    property LatencyMS: LongWord read FLatencyMS write FLatencyMS;
   end;
 
 {$ENDIF}
@@ -67,6 +72,7 @@ begin
   // the base converts incoming data to Format (afFloat32, set in Create), so
   // tell PulseAudio we are feeding it float32.
   FStream := TPulseAsyncStream.Create('PascalAudio', Info.SamplesPerSecond, Info.Channels, sfFloat32LE);
+  FStream.TargetLatencyMS := FLatencyMS;
   if not FStream.Open then
     TPALog.Error('pa_pulse', 'async open failed: ' + FStream.LastError);
 end;
@@ -94,8 +100,7 @@ end;
 
 constructor TPAPulseAsyncDestination.Create;
 begin
-  BufferPool.AllocateBuffers(4);
-  inherited Create;
+  inherited Create; // base destination provides its 2 pooled buffers
   Format := afFloat32;
 end;
 

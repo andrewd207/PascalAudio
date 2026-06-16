@@ -139,7 +139,7 @@ var
   Buffer: PAudioBuffer;
 begin
 
-  Buffer := BufferPool.GetBufferFromPool(True);
+  Buffer := BufferPool.GetBufferFromPool(True, @FlushPendingSends);
   Buffer^.UsedData := FStream.Read(Buffer^.Data, AUDIO_BUFFER_SIZE);
   Buffer^.IsEndOfData:= Buffer^.UsedData < AUDIO_BUFFER_SIZE;
 
