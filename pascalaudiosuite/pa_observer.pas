@@ -37,6 +37,12 @@ type
     FOnDataFinished: TNotifyEvent;
     procedure DoDataFinished; // runs on the main thread
   protected
+    // Report the SOURCE's format so the base link does no conversion before our
+    // InternalProcessData. Without this we'd inherit the link default (afFloat32)
+    // and the base would convert e.g. S16 input to float32 -- which both breaks
+    // the "forward unchanged" promise and doubles the byte count past the 8192
+    // buffer in InternalProcessData (a heap overflow). True passthrough instead.
+    function  GetFormat: TPAAudioFormat; override;
     function  InternalProcessData(const AData; ACount: Int64;
                 AIsLastData: Boolean): Int64; override;
     procedure SignalDestinationsDone; override;
@@ -47,6 +53,15 @@ type
 implementation
 
 { TPAObserverLink }
+
+function TPAObserverLink.GetFormat: TPAAudioFormat;
+begin
+  // delegate to the source: forward its format unchanged (no conversion)
+  if Assigned(DataSource) and (DataSource.GetSourceObject is IPAAudioInformation) then
+    Result := (DataSource.GetSourceObject as IPAAudioInformation).GetFormat
+  else
+    Result := inherited GetFormat;
+end;
 
 function TPAObserverLink.InternalProcessData(const AData; ACount: Int64;
   AIsLastData: Boolean): Int64;
