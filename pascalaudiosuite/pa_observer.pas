@@ -53,8 +53,13 @@ function TPAObserverLink.InternalProcessData(const AData; ACount: Int64;
 var
   B: PAudioBuffer;
 begin
-  // forward the data unchanged to whatever is chained after us
-  B := BufferPool.GetBufferFromPool(True);
+  // forward the data unchanged to whatever is chained after us. Pass the
+  // FlushPendingSends pump: if the pool is empty we may block here while output
+  // we already produced sits queued (PAM_SendBuffer) on our own thread,
+  // undelivered -- so the destination starves and never returns a buffer. The
+  // pump delivers that pending output while we wait, breaking the deadlock.
+  // (Without it the chain stalled after a few buffers under back-pressure.)
+  B := BufferPool.GetBufferFromPool(True, @FlushPendingSends);
   B^.Format      := Format;
   B^.UsedData    := ACount;
   B^.IsEndOfData := AIsLastData;
