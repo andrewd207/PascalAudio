@@ -11,13 +11,22 @@ uses
 
 type
 
+  // How the meter auto-scales each frame:
+  //   nmPerBand - every bar scales against its own running peak (loud bass won't
+  //               flatten the quieter highs; shows spectral shape/activity).
+  //   nmPerMax  - all bars scale against one shared peak across the whole frame
+  //               (preserves the real loudness balance between bands).
+  TVUNormMode = (nmPerBand, nmPerMax);
+
   { TVUMeter
     A simple custom widget that draws a row of vertical bars, one per band. }
 
   TVUMeter = class(TfpgWidget)
   private
     FBars: array of Single;   // displayed level 0..1 (with snappy fall-off)
-    FRef: Single;             // adaptive normalisation reference
+    FRef: array of Single;    // per-band adaptive normalisation reference
+    FGlobalRef: Single;       // shared reference used in nmPerMax mode
+    FNormMode: TVUNormMode;
   protected
     procedure HandlePaint; override;
     procedure HandleResize(AWidth, AHeight: TfpgCoord); override; // repaint on resize
@@ -25,6 +34,7 @@ type
     constructor Create(AOwner: TComponent); override;
     procedure SetBands(const AValues: array of Single); // update bars from a spectrum
     procedure Decay;                                    // ease bars toward 0 when idle
+    property NormMode: TVUNormMode read FNormMode write FNormMode;
   end;
 
   { TMainForm }
@@ -32,6 +42,7 @@ type
   TMainForm = class(TfpgForm)
   private
     btnOpen: TfpgButton;
+    btnNorm: TfpgButton;
     lblFile: TfpgLabel;
     FMeter: TVUMeter;
     FPump: TfpgTimer;
@@ -40,6 +51,8 @@ type
     FDest: TPAAudioDestination;
     FFileName: String;
     procedure btnOpenClick(Sender: TObject);
+    procedure btnNormClick(Sender: TObject);
+    procedure UpdateNormButton;
     procedure PumpTimer(Sender: TObject);
     function  GetFilter: String;
     procedure OpenFile(AFileName: String);
@@ -55,42 +68,66 @@ uses
   fpg_dialogs;
 
 const
-  BANDS = 16;
+  BANDS = 128;
 
 { TVUMeter }
 
 constructor TVUMeter.Create(AOwner: TComponent);
+var
+  i: Integer;
 begin
   inherited Create(AOwner);
   SetLength(FBars, BANDS);
-  FRef := 1e-6;
+  SetLength(FRef, BANDS);
+  for i := 0 to High(FRef) do
+    FRef[i] := 1e-6;
+  FGlobalRef := 1e-6;
+  FNormMode := nmPerBand;
 end;
 
 procedure TVUMeter.SetBands(const AValues: array of Single);
 var
   i, n: Integer;
-  v, mx: Single;
+  v, mx, ref: Single;
 begin
   n := Length(AValues);
   if n > Length(FBars) then
     n := Length(FBars);
 
-  // Track the loudest band so the meter auto-scales to the material instead of
-  // needing a fixed gain: jump up instantly, ease back down.
-  mx := 0;
-  for i := 0 to n - 1 do
-    if AValues[i] > mx then
-      mx := AValues[i];
-  if mx > FRef then
-    FRef := mx
-  else
-    FRef := FRef * 0.80 + mx * 0.20; // re-scale to quieter passages quickly
-  if FRef < 1e-6 then
-    FRef := 1e-6;
+  // In nmPerMax, derive one shared reference from the loudest band this frame
+  // (snap up, ease down). nmPerBand updates each band's own reference below.
+  if FNormMode = nmPerMax then
+  begin
+    mx := 0;
+    for i := 0 to n - 1 do
+      if AValues[i] > mx then
+        mx := AValues[i];
+    if mx > FGlobalRef then
+      FGlobalRef := mx
+    else
+      FGlobalRef := FGlobalRef * 0.80 + mx * 0.20;
+    if FGlobalRef < 1e-6 then
+      FGlobalRef := 1e-6;
+  end;
 
   for i := 0 to n - 1 do
   begin
-    v := AValues[i] / FRef;
+    if FNormMode = nmPerBand then
+    begin
+      // each bar scales against its OWN running peak, so loud bass bands don't
+      // set the reference for the whole meter and flatten the quieter highs.
+      if AValues[i] > FRef[i] then
+        FRef[i] := AValues[i]
+      else
+        FRef[i] := FRef[i] * 0.80 + AValues[i] * 0.20;
+      if FRef[i] < 1e-6 then
+        FRef[i] := 1e-6;
+      ref := FRef[i];
+    end
+    else
+      ref := FGlobalRef;
+
+    v := AValues[i] / ref;
     if v > 1 then
       v := 1;
     if v > FBars[i] then
@@ -123,7 +160,12 @@ begin
   // keep drawing at the original dimensions.
   w := ActualWidth;
   h := ActualHeight;
+  // Adaptive gap: 3 px looks good with few bars, but with many bars (e.g. 128)
+  // fixed gaps eat the whole width. Drop the gap to keep the bars visible, and
+  // to 0 once they'd otherwise vanish.
   gap := 3;
+  while (gap > 0) and ((w - gap * (Length(FBars) + 1)) div Length(FBars) < 2) do
+    Dec(gap);
   bw := (w - gap * (Length(FBars) + 1)) div Length(FBars);
   if bw < 1 then
     bw := 1;
@@ -264,6 +306,23 @@ begin
   dlg.Free;
 end;
 
+procedure TMainForm.UpdateNormButton;
+begin
+  if FMeter.NormMode = nmPerBand then
+    btnNorm.Text := 'Norm: Per-band'
+  else
+    btnNorm.Text := 'Norm: Per-max';
+end;
+
+procedure TMainForm.btnNormClick(Sender: TObject);
+begin
+  if FMeter.NormMode = nmPerBand then
+    FMeter.NormMode := nmPerMax
+  else
+    FMeter.NormMode := nmPerBand;
+  UpdateNormButton;
+end;
+
 procedure TMainForm.AfterCreate;
 begin
   Name := 'MainForm';
@@ -279,11 +338,19 @@ begin
     OnClick := @btnOpenClick;
   end;
 
+  btnNorm := TfpgButton.Create(self);
+  with btnNorm do
+  begin
+    Name := 'btnNorm';
+    SetPosition(106, 10, 130, 26);
+    OnClick := @btnNormClick;
+  end;
+
   lblFile := TfpgLabel.Create(self);
   with lblFile do
   begin
     Name := 'lblFile';
-    SetPosition(110, 14, 310, 18);
+    SetPosition(244, 14, 176, 18);
     Anchors := [anLeft, anRight, anTop];
     Text := '(no file)';
   end;
@@ -295,6 +362,7 @@ begin
     SetPosition(10, 46, 410, 224);
     Anchors := [anLeft, anRight, anTop, anBottom];
   end;
+  UpdateNormButton; // label the toggle from the meter's initial mode
 
   // ~60 fps: pumps queued spectra at the frame rate
   FPump := TfpgTimer.Create(16);
