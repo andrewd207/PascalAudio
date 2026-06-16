@@ -11,12 +11,16 @@ uses
 
 type
 
-  // How the meter auto-scales each frame:
+  // How the meter scales each frame:
   //   nmPerBand - every bar scales against its own running peak (loud bass won't
   //               flatten the quieter highs; shows spectral shape/activity).
   //   nmPerMax  - all bars scale against one shared peak across the whole frame
   //               (preserves the real loudness balance between bands).
-  TVUNormMode = (nmPerBand, nmPerMax);
+  //   nmFixed   - no auto-gain: raw magnitude against a constant, so absolute
+  //               loudness shows through (quiet stays low, loud peaks spike).
+  //   nmLog     - fixed logarithmic: each decade of magnitude takes equal
+  //               vertical space (graded clamping of the loud end), no auto-gain.
+  TVUNormMode = (nmPerBand, nmPerMax, nmFixed, nmLog);
 
   { TVUMeter
     A simple custom widget that draws a row of vertical bars, one per band. }
@@ -69,6 +73,13 @@ uses
 
 const
   BANDS = 128;
+  // Fixed-gain reference for nmFixed: raw band magnitude is divided by this and
+  // clamped to 1. Tune to taste -- lower = more sensitive/taller bars.
+  VU_FIXED_REF = 8.0;
+  // Fixed logarithmic range for nmLog: magnitudes from VU_LOG_LO..VU_LOG_HI map
+  // bottom..top, each 10x taking equal vertical space. Here ~4 decades.
+  VU_LOG_LO = 0.01;
+  VU_LOG_HI = 100.0;
 
 { TVUMeter }
 
@@ -82,13 +93,13 @@ begin
   for i := 0 to High(FRef) do
     FRef[i] := 1e-6;
   FGlobalRef := 1e-6;
-  FNormMode := nmPerBand;
+  FNormMode := nmLog; // fixed-log (graded clamping) reads best; toggle to compare
 end;
 
 procedure TVUMeter.SetBands(const AValues: array of Single);
 var
   i, n: Integer;
-  v, mx, ref: Single;
+  v, mx, m: Single;
 begin
   n := Length(AValues);
   if n > Length(FBars) then
@@ -112,22 +123,37 @@ begin
 
   for i := 0 to n - 1 do
   begin
-    if FNormMode = nmPerBand then
-    begin
-      // each bar scales against its OWN running peak, so loud bass bands don't
-      // set the reference for the whole meter and flatten the quieter highs.
-      if AValues[i] > FRef[i] then
-        FRef[i] := AValues[i]
-      else
-        FRef[i] := FRef[i] * 0.80 + AValues[i] * 0.20;
-      if FRef[i] < 1e-6 then
-        FRef[i] := 1e-6;
-      ref := FRef[i];
-    end
-    else
-      ref := FGlobalRef;
+    case FNormMode of
+      nmPerBand:
+        begin
+          // each bar scales against its OWN running peak, so loud bass bands
+          // don't set the reference for the whole meter and flatten the highs.
+          if AValues[i] > FRef[i] then
+            FRef[i] := AValues[i]
+          else
+            FRef[i] := FRef[i] * 0.80 + AValues[i] * 0.20;
+          if FRef[i] < 1e-6 then
+            FRef[i] := 1e-6;
+          v := AValues[i] / FRef[i];
+        end;
+      nmPerMax: v := AValues[i] / FGlobalRef;
+      nmFixed:  v := AValues[i] / VU_FIXED_REF; // no auto-gain: raw magnitude
+      nmLog:
+        begin
+          // Log (decade) height: each 10x in magnitude takes equal vertical
+          // space, so VU_LOG_LO..VU_LOG_HI maps across the bar as
+          // log10(m)-log10(lo) over the decade span. Big numbers get
+          // "graded clamping": the top decades are compressed into the upper
+          // portion instead of pinning everything to full scale.
+          m := AValues[i];
+          if m < VU_LOG_LO then
+            m := VU_LOG_LO;
+          v := (Ln(m) - Ln(VU_LOG_LO)) / (Ln(VU_LOG_HI) - Ln(VU_LOG_LO));
+        end;
+    end;
 
-    v := AValues[i] / ref;
+    if v < 0 then
+      v := 0;
     if v > 1 then
       v := 1;
     if v > FBars[i] then
@@ -308,18 +334,21 @@ end;
 
 procedure TMainForm.UpdateNormButton;
 begin
-  if FMeter.NormMode = nmPerBand then
-    btnNorm.Text := 'Norm: Per-band'
-  else
-    btnNorm.Text := 'Norm: Per-max';
+  case FMeter.NormMode of
+    nmPerBand: btnNorm.Text := 'Norm: Per-band';
+    nmPerMax:  btnNorm.Text := 'Norm: Per-max';
+    nmFixed:   btnNorm.Text := 'Norm: Fixed';
+    nmLog:     btnNorm.Text := 'Norm: Log';
+  end;
 end;
 
 procedure TMainForm.btnNormClick(Sender: TObject);
 begin
-  if FMeter.NormMode = nmPerBand then
-    FMeter.NormMode := nmPerMax
+  // cycle Per-band -> Per-max -> Fixed -> Per-band
+  if FMeter.NormMode = High(TVUNormMode) then
+    FMeter.NormMode := Low(TVUNormMode)
   else
-    FMeter.NormMode := nmPerBand;
+    FMeter.NormMode := Succ(FMeter.NormMode);
   UpdateNormButton;
 end;
 
