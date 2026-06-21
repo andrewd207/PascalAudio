@@ -750,8 +750,22 @@ begin
     if Res = wrSignaled then
     begin
       // CheckWaitFor dequeued our event and handed it a returned buffer.
-      Result := WaitEvent.Buffer;
-      FreeAndNil(WaitEvent);
+      // Free under the pool lock, NOT here-and-now: CheckWaitFor's SetEvent woke
+      // us from *inside* the event's FCrit (and while holding the pool FCrit),
+      // and only releases the pool FCrit once SetEvent has fully returned. If we
+      // freed immediately we'd race that -- DoneCriticalSection ->
+      // pthread_mutex_destroy on the still-locked mutex returns EBUSY, which
+      // cthreads raises as EThreadError 'Thread error' (and we'd also touch the
+      // freed object from the signaller). Taking FCrit blocks until the signaller
+      // is completely done with the event, so the destroy is safe. (Matches the
+      // timeout path below, which already frees under the lock.)
+      EnterCriticalsection(FCrit);
+      try
+        Result := WaitEvent.Buffer;
+        FreeAndNil(WaitEvent);
+      finally
+        LeaveCriticalsection(FCrit);
+      end;
       Break;
     end;
 
