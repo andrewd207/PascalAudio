@@ -90,6 +90,11 @@ type
     function  WriteBuffer(ABuffer: PAudioBuffer): Boolean;
     procedure SetDataEvent;
     procedure EndOfData;
+    // Clear the upstream-source back-reference WITHOUT calling back into the
+    // source. The source calls this on each destination as it is destroyed, so a
+    // later destination teardown (source-first order) won't try to detach from a
+    // freed source.
+    procedure DetachSource;
 
     function  GetObject: TObject;
     property  DataSource: IPAAudioSource read GetDataSource write SetDataSource;
@@ -194,6 +199,11 @@ type
     FDestroySynced: Boolean;  // ensures DestroyWaitSync only runs once
     FSignaled: Boolean;
     FDestBuf: PAudioBuffer;
+    // Guards FDestinations and is held by the worker across each WriteBuffer, so
+    // a destination being torn down (RemoveDestination, on another thread) can't
+    // free itself while the worker is mid-delivery to it. Recursive: the worker
+    // re-enters via the GetBufferFromPool pump while already holding it.
+    FDestCrit: TRTLCriticalSection;
     //Datasource: IPAAudioSource;
     procedure EnsureAudioBuffer;
   protected
@@ -333,6 +343,7 @@ type
     // actually writes the data from the queue to the destination from inside the thread
     function  InternalProcessData(const AData; ACount: Int64; AIsLastData: Boolean): Int64; virtual; abstract;
     procedure EndOfData; virtual;
+    procedure DetachSource;
     function  GetObject: TObject;
     // a destination's channel count / sample rate describe the audio it
     // receives, so report the upstream source's values (like TPAAudioLink does)
@@ -378,6 +389,7 @@ type
     function  GetChannels: Integer; override;
     procedure SetDataEvent;
     procedure EndOfData; virtual; // called by audiosource
+    procedure DetachSource;
     function  GetObject: TObject;
 
     procedure Execute; override;
@@ -1127,6 +1139,13 @@ begin
   Result := Self;
 end;
 
+procedure TPAAudioDestination.DetachSource;
+begin
+  // The source is severing the link from its side; just drop the back-pointer so
+  // our destructor won't try to call back into the (being-)freed source.
+  FDataSource := nil;
+end;
+
 constructor TPAAudioDestination.Create;
 begin
   // 2 buffers is enough under the back-pressured pull model: one being processed
@@ -1137,6 +1156,16 @@ end;
 
 destructor TPAAudioDestination.Destroy;
 begin
+  // Detach from the source FIRST, while our own worker is still draining (so the
+  // source can make progress and process the removal). After this the source no
+  // longer delivers to us, so freeing FBufferManager below is safe. Skipped if
+  // the source was already torn down (it cleared FDataSource via DetachSource).
+  if FDataSource <> nil then
+  begin
+    FDataSource.RemoveDestination(Self);
+    FDataSource := nil;
+  end;
+
   FFreeObject := TSimpleEvent.Create;
   FMsgQueue.PostMessage(PAM_ObjectIsDestroying);
   FFreeObject.WaitFor(5000); // wait upto 5 seconds for execute to exit
@@ -1504,20 +1533,36 @@ procedure TPAAudioSource.AddDestination(AValue: IPAAudioDestination);
 var
   i: Integer;
 begin
-  i := FDestinations.IndexOf(AValue);
-  if i >= 0 then
-    FDestinations.Delete(i);
+  EnterCriticalsection(FDestCrit);
+  try
+    i := FDestinations.IndexOf(AValue);
+    if i >= 0 then
+      FDestinations.Delete(i);
 
-  FDestinations.Add(AValue);
+    FDestinations.Add(AValue);
+  finally
+    LeaveCriticalsection(FDestCrit);
+  end;
 end;
 
 procedure TPAAudioSource.RemoveDestination(AValue: IPAAudioDestination);
 var
   i: Integer;
 begin
-  i := FDestinations.IndexOf(AValue);
-  if i >= 0 then
-    FDestinations.Delete(i);
+  // Take FDestCrit, which the worker also holds across each WriteBuffer. So if
+  // the worker is mid-delivery to AValue right now, this blocks until that
+  // WriteBuffer returns; once we've removed AValue from the list, delivery's
+  // membership check (also under FDestCrit) guarantees it won't be touched
+  // again. When this returns, AValue is safe to free. This is what makes a
+  // destination-first teardown (the reporter's order) race-free.
+  EnterCriticalsection(FDestCrit);
+  try
+    i := FDestinations.IndexOf(AValue);
+    if i >= 0 then
+      FDestinations.Delete(i);
+  finally
+    LeaveCriticalsection(FDestCrit);
+  end;
 end;
 
 procedure TPAAudioSource.WriteToDestinations(const ABuffer: PAudioBuffer);
@@ -1527,24 +1572,30 @@ var
 begin
   //WriteLn(ClassName, ' writing buffer to dests');
 
-  if FDestinations.Count < 1 then
-  begin
-    // return the buffer to the pool or we will run out of buffers.
-    // normally the dest will return the buffer to the pool.
-    BufferPool.ReturnBufferToPool(ABuffer);
-    Exit;
-  end;
-
   // mark the type of data in the buffer.
   ABuffer^.Format:=FFormat;
 
-  // Post a single send message with the buffer and a snapshot of the wanted
-  // destinations. This is just the hand-off -- it never copies and never touches
-  // the pool, so a producer can't block here mid-output. The worker thread does
-  // the fan-out (and any copy for >1 destination) when it processes the message.
-  SetLength(Dests, FDestinations.Count);
-  for i := 0 to FDestinations.Count - 1 do
-    Dests[i] := IPAAudioDestination(FDestinations[i]);
+  // Snapshot the wanted destinations under the lock (so a concurrent
+  // RemoveDestination can't leave us with a stale/half list). This is just the
+  // hand-off -- it never copies and never touches the pool, so a producer can't
+  // block here mid-output. The worker thread does the fan-out (and any copy for
+  // >1 destination) when it processes the message.
+  EnterCriticalsection(FDestCrit);
+  try
+    SetLength(Dests, FDestinations.Count);
+    for i := 0 to FDestinations.Count - 1 do
+      Dests[i] := IPAAudioDestination(FDestinations[i]);
+  finally
+    LeaveCriticalsection(FDestCrit);
+  end;
+
+  if Length(Dests) < 1 then
+  begin
+    // no destinations: return the buffer to the pool or we leak it (normally a
+    // destination returns it after consuming).
+    BufferPool.ReturnBufferToPool(ABuffer);
+    Exit;
+  end;
 
   FMsgQueue.PostMessage(TPABufferMessage.Create(ABuffer, Dests));
 end;
@@ -1598,29 +1649,58 @@ begin
   begin
     Dst := AMsg.Dests[0];
     IsLast := Length(AMsg.Dests) = 1;
-    if IsLast then
-      SendBuf := AMsg.Buffer
-    else
+
+    // Make the fan-out copy BEFORE taking FDestCrit: GetBufferFromPool can block
+    // indefinitely on an exhausted pool, and we must not hold FDestCrit across
+    // that (RemoveDestination, which unblocks teardown, waits on it). WriteBuffer
+    // below is bounded (~100ms) so holding the lock across it is safe.
+    if not IsLast then
     begin
       SendBuf := BufferPool.GetBufferFromPool(True);
       SendBuf^ := AMsg.Buffer^;
-    end;
-
-    if Dst.WriteBuffer(SendBuf) then
-    begin
-      if IsLast then
-        AMsg.Buffer := nil; // original handed off; don't return it when freed
-      // drop the delivered destination from the front of the list
-      for i := 1 to High(AMsg.Dests) do
-        AMsg.Dests[i - 1] := AMsg.Dests[i];
-      SetLength(AMsg.Dests, Length(AMsg.Dests) - 1);
     end
     else
-    begin
-      // destination full: discard the unused copy and ask to be re-queued.
-      if not IsLast then
+      SendBuf := AMsg.Buffer;
+
+    // Hold FDestCrit across the membership check AND the WriteBuffer: this
+    // snapshot was taken when the buffer was produced, so a destination may be
+    // tearing down right now. RemoveDestination takes the same lock, so it
+    // either runs before this check (we see it gone and skip) or waits until
+    // this WriteBuffer returns. Either way we never touch a freed destination
+    // (which would fault on its destroyed lock -- the issue #7 EThreadError).
+    EnterCriticalsection(FDestCrit);
+    try
+      if FDestinations.IndexOf(Dst) < 0 then
+      begin
+        // destination removed since the snapshot: don't touch it. Reclaim the
+        // buffer we would have given it (the copy, or the original if last).
         BufferPool.ReturnBufferToPool(SendBuf);
-      Exit(False);
+        if IsLast then
+          AMsg.Buffer := nil;
+        for i := 1 to High(AMsg.Dests) do
+          AMsg.Dests[i - 1] := AMsg.Dests[i];
+        SetLength(AMsg.Dests, Length(AMsg.Dests) - 1);
+        Continue;
+      end;
+
+      if Dst.WriteBuffer(SendBuf) then
+      begin
+        if IsLast then
+          AMsg.Buffer := nil; // original handed off; don't return it when freed
+        // drop the delivered destination from the front of the list
+        for i := 1 to High(AMsg.Dests) do
+          AMsg.Dests[i - 1] := AMsg.Dests[i];
+        SetLength(AMsg.Dests, Length(AMsg.Dests) - 1);
+      end
+      else
+      begin
+        // destination full: discard the unused copy and ask to be re-queued.
+        if not IsLast then
+          BufferPool.ReturnBufferToPool(SendBuf);
+        Exit(False);
+      end;
+    finally
+      LeaveCriticalsection(FDestCrit);
     end;
   end;
   Result := True;
@@ -1725,8 +1805,13 @@ begin
   end;
 
   //WriteLn(ClassName,' telling destinations done');
-  for i := 0 to FDestinations.Count-1 do
-    IPAAudioDestination(FDestinations[i]).EndOfData;
+  EnterCriticalsection(FDestCrit);
+  try
+    for i := 0 to FDestinations.Count-1 do
+      IPAAudioDestination(FDestinations[i]).EndOfData;
+  finally
+    LeaveCriticalsection(FDestCrit);
+  end;
 
 
 end;
@@ -1770,12 +1855,25 @@ constructor TPAAudioSource.Create;
 begin
   inherited Create;
   FDestinations := specialize TFPGList<IPAAudioDestination>.create;
+  InitCriticalSection(FDestCrit);
   BufferPool.AllocateBuffers(1);
 end;
 
 destructor TPAAudioSource.Destroy;
+var
+  i: Integer;
 begin
   DestroyWaitSync;
+  // The worker is stopped now, so no delivery races this. Sever the back-pointer
+  // in each still-attached destination so that destroying them afterwards
+  // (source-first teardown) won't try to detach from this freed source.
+  EnterCriticalsection(FDestCrit);
+  try
+    for i := 0 to FDestinations.Count - 1 do
+      FDestinations[i].DetachSource;
+  finally
+    LeaveCriticalsection(FDestCrit);
+  end;
   // Return the partially-filled buffer we were still accumulating into. On a
   // normal end-of-data SignalDestinationsDone flushes and nils it, but when the
   // source is freed mid-stream (e.g. the user loads another song) it's still
@@ -1790,6 +1888,7 @@ begin
   // from TPAAudioSource), so each chain returns exactly what it added.
   BufferPool.DeallocateBuffers(1);
   FDestinations.Free;
+  DoneCriticalsection(FDestCrit);
   inherited Destroy;
 end;
 
@@ -1828,12 +1927,26 @@ end;
 
 destructor TPAAudioLink.Destroy;
 begin
+  // Detach from our upstream source first (while our own worker still drains) so
+  // it stops feeding our FBufferManager before we free it. Skipped if the source
+  // already severed the link via DetachSource (source-first teardown).
+  if FDataSource <> nil then
+  begin
+    FDataSource.RemoveDestination(Self);
+    FDataSource := nil;
+  end;
+
   // stop the worker thread before freeing the resources its Execute loop uses
   // (FBufferManager / FCrit), otherwise it can touch them after they're gone.
   DestroyWaitSync;
   FBufferManager.Free;
   DoneCriticalsection(FCrit);
   inherited Destroy;
+end;
+
+procedure TPAAudioLink.DetachSource;
+begin
+  FDataSource := nil;
 end;
 
 initialization
