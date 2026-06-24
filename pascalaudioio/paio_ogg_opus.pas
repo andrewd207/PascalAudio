@@ -59,6 +59,7 @@ type
     function NextPacketSize(out ANeedNewPage: Boolean): Integer;
     function FindBestPageForSample(ASampleNumber: QWord; out ASegmentIndex: Integer): Boolean;
     procedure SetSamplePosition(AValue: QWord);
+    procedure SeekToEnd;
     function PreviousPageSampleEnd: Int64;
   public
     constructor Create(AStream: TStream);
@@ -262,6 +263,12 @@ var
 
 begin
   Result := False;
+  // If a seek target lands at (or past) the end of the stream there is no page
+  // here to find; bail instead of letting ReadByte run off the end and raise
+  // EReadError/EAccessViolation (issue #7: "opus.Position := 44" on a clip
+  // shorter than 44s). The caller falls back to end-of-data.
+  if FStream.Position >= FStream.Size then
+    Exit(False);
   repeat
     case Char(FStream.ReadByte) of
       'S': FStream.Seek(-4, soFromCurrent);
@@ -339,7 +346,8 @@ begin
     lMid := (lHigh - lLow) div 2 + lLow;
     FStream.Seek(lMid, soBeginning);
 
-    FindPageStart; // locate the page that starts at or before our current position
+    if not FindPageStart then // locate the page that starts at or before our current position
+      Exit(False); // hit EOF without a page -> let SetSamplePosition fall back
     lPageStart:=FStream.Position;
     ReadPageHeader; // page we are comparing to position
     lPageEnd:=lPageStart+FPage.SegmentDataSize(lPacketCount);
@@ -391,18 +399,33 @@ end;
 procedure TOggOpusDecoder.SetSamplePosition(AValue: QWord);
 var
   lSegmentIndex: Integer;
-  lBuf: array[0..AUDIO_BUFFER_SIZE] of Byte;
 begin
   if FSamplePosition=AValue then Exit;
-  if AValue > TotalSamples then
-    AValue:=FTotalSamples;
+
+  // Seeking to or past the end of the data: do NOT run the page binary search.
+  // It would drive FindPageStart/ReadPageHeader past EOF and raise (issue #7).
+  // Instead, position the stream at the end so the next DecodePacket reports
+  // end-of-data and playback finishes cleanly.
+  if AValue >= TotalSamples then
+  begin
+    SeekToEnd;
+    Exit;
+  end;
+
   FSamplePosition:=AValue;
-  FindBestPageForSample(AValue, lSegmentIndex);
-  {FDecoder.Init(48000, Channels);
-  FPageSegmentIndex:=0;
-  while FPageSegmentIndex < lSegmentIndex do}
+  if not FindBestPageForSample(AValue, lSegmentIndex) then
+    // couldn't locate a page (e.g. truncated/garbage stream): fall back to
+    // end-of-data rather than leaving the stream in an unusable state.
+    SeekToEnd;
+end;
 
-
+procedure TOggOpusDecoder.SeekToEnd;
+begin
+  FSamplePosition:=FTotalSamples;
+  FStream.Position:=FStream.Size;
+  // make IsEndOfPage true so DecodePacket takes its end-of-data path (it checks
+  // FStream.Position = FStream.Size) instead of trying to read another page.
+  FPageSegmentIndex:=FPage.SegmentsCount;
 end;
 
 function TOggOpusDecoder.PreviousPageSampleEnd: Int64;
