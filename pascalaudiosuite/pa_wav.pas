@@ -429,6 +429,11 @@ end;
 
 initialization
   PARegister(partEncoder, TPAWavDest,   'Wave/PCM', '.wav' ,'RIFF', 4);
-  PARegister(partDecoder, TPAWavSource, 'Wave/PCM', '.wav');
+  // Must register the RIFF magic too: content-based lookup
+  // (PARegisteredGetDecoderClass(file, AOnlyUseExtention=False), as smartplay
+  // uses) matches by magic, and the default cPAFileMagicEmpty (#0#0#0#0) never
+  // matches a real WAV, so the decoder was invisible and ReaderClass came back
+  // nil -> access violation. (issue #6)
+  PARegister(partDecoder, TPAWavSource, 'Wave/PCM', '.wav', 'RIFF', 4);
 end.
 
